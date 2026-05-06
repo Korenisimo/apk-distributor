@@ -61,7 +61,13 @@ export async function GET(
       );
     }
 
-    const signedUrl = await getR2SignedUrl(apkKey);
+    // Fetch metadata to build a proper download filename
+    const metadata = await getAppMetadata(slug);
+    const version = metadata?.version || "unknown";
+    const appName = (metadata?.name || slug).replace(/[^a-zA-Z0-9_-]/g, "-");
+    const downloadFilename = `${appName}-v${version}.apk`;
+
+    const signedUrl = await getR2SignedUrl(apkKey, 300, downloadFilename);
     return NextResponse.redirect(signedUrl, 302);
   } catch (err) {
     console.error(`Download failed for ${slug}:`, err);

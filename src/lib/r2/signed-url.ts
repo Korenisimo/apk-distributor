@@ -8,11 +8,15 @@ import { getR2Client, getR2Bucket } from "./client";
  */
 export async function getR2SignedUrl(
   key: string,
-  expiresInSeconds = 300
+  expiresInSeconds = 300,
+  downloadFilename?: string
 ): Promise<string> {
   const command = new GetObjectCommand({
     Bucket: getR2Bucket(),
     Key: key,
+    ...(downloadFilename && {
+      ResponseContentDisposition: `attachment; filename="${downloadFilename}"`,
+    }),
   });
   return getSignedUrl(getR2Client(), command, {
     expiresIn: expiresInSeconds,
