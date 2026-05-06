@@ -14,6 +14,9 @@ jobs:
       app-slug: "distributor"
       app-name: "APK Distributor"
       working-directory: "mobile"
+      build-command: >
+        EXPO_PUBLIC_DISTRIBUTOR_URL=https://apk-distributor.vercel.app
+        npx eas-cli build --platform android --profile preview --local --output ./app.apk --non-interactive
     secrets:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
       R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}

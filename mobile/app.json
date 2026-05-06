@@ -10,7 +10,8 @@
       "permissions": [
         "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE"
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.INTERNET"
       ]
     },
     "plugins": [
@@ -23,6 +24,12 @@
           ]
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "236ab0e7-1994-4a30-8509-baac609aba7f"
+      }
+    },
+    "owner": "korenisimo"
   }
 }
