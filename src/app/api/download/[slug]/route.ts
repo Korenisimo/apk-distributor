@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { auth } from "@/auth";
 import { getR2Client, getR2Bucket } from "@/lib/r2/client";
 import { getR2SignedUrl } from "@/lib/r2/signed-url";
 import { getAppMetadata } from "@/lib/r2/registry";
@@ -14,6 +15,11 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ slug: string }> }
 ) {
+  const session = await auth();
+  if (!session) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const { slug } = await params;
   const apkKey = `apps/${slug}/latest.apk`;
 
