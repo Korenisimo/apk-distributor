@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Test env (contains real R2 credentials)
+.env.test
+.env.local
+.env
