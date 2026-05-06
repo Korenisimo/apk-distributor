@@ -11,6 +11,11 @@ on:
         description: 'Human-readable app name (e.g., "HOD Travel Journal")'
         required: true
         type: string
+      working-directory:
+        description: 'Subdirectory to run npm ci and build in (default: repo root)'
+        required: false
+        type: string
+        default: '.'
       build-command:
         description: 'Command to produce the APK. Must output a file at apk-path.'
         required: false
@@ -46,10 +51,16 @@ on:
         required: true
       DISTRIBUTOR_WEBHOOK_URL:
         required: true
+      MOBILE_API_KEY:
+        description: 'API key baked into the mobile app build (EXPO_PUBLIC_MOBILE_API_KEY)'
+        required: false
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -122,6 +133,7 @@ jobs:
         run: ${{ inputs.build-command }}
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_MOBILE_API_KEY: ${{ secrets.MOBILE_API_KEY }}
 
       - name: Verify APK exists
         run: |

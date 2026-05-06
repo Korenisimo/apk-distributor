@@ -10,6 +10,6 @@ export const config = {
      * - /favicon.ico
      * - /login (login page itself)
      */
-    "/((?!api/auth|api/webhook|_next|favicon.ico|login).*)",
+    "/((?!api/auth|api/webhook|api/mobile|_next|favicon.ico|login).*)",
   ],
 };
