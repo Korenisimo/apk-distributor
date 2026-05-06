@@ -54,6 +54,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Notify build started
+        run: |
+          curl -s -X POST "${{ secrets.DISTRIBUTOR_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.DISTRIBUTOR_WEBHOOK_SECRET }}" \
+            -d '{
+              "event": "build_started",
+              "app": {
+                "slug": "${{ inputs.app-slug }}",
+                "name": "${{ inputs.app-name }}",
+                "repo": "${{ github.repository }}",
+                "sha": "${{ github.sha }}",
+                "runId": ${{ github.run_id }},
+                "runNumber": ${{ github.run_number }},
+                "ref": "${{ github.ref_name }}",
+                "triggeredBy": "${{ github.actor }}",
+                "startedAt": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
+              }
+            }' || echo "⚠️ Failed to notify build started (non-fatal)"
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -98,6 +118,7 @@ jobs:
         run: npm ci
 
       - name: Build APK
+        id: build
         run: ${{ inputs.build-command }}
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
@@ -194,3 +215,32 @@ jobs:
           APP_SLUG: ${{ inputs.app-slug }}
           APP_NAME: ${{ inputs.app-name }}
           APK_PATH: ${{ inputs.apk-path }}
+
+      - name: Notify build failed
+        if: failure()
+        run: |
+          # Determine which step failed
+          FAILED_STEP="unknown"
+          if [ "${{ steps.build.outcome }}" = "failure" ]; then
+            FAILED_STEP="Build APK"
+          fi
+
+          curl -s -X POST "${{ secrets.DISTRIBUTOR_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -H "X-Webhook-Secret: ${{ secrets.DISTRIBUTOR_WEBHOOK_SECRET }}" \
+            -d '{
+              "event": "build_failed",
+              "app": {
+                "slug": "${{ inputs.app-slug }}",
+                "name": "${{ inputs.app-name }}",
+                "repo": "${{ github.repository }}",
+                "sha": "${{ github.sha }}",
+                "runId": ${{ github.run_id }},
+                "runNumber": ${{ github.run_number }},
+                "ref": "${{ github.ref_name }}",
+                "triggeredBy": "${{ github.actor }}",
+                "failedAt": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
+                "failedStep": "'"${FAILED_STEP}"'",
+                "actionsUrl": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              }
+            }' || echo "⚠️ Failed to notify build failure (non-fatal)"

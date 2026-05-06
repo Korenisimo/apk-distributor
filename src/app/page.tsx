@@ -5,6 +5,21 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+interface BuildStatus {
+  status: "building" | "success" | "failed";
+  sha: string;
+  runId: number;
+  runNumber: number;
+  ref: string;
+  triggeredBy: string;
+  startedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  failedStep?: string;
+  actionsUrl?: string;
+  repo: string;
+}
+
 interface AppInfo {
   slug: string;
   name: string;
@@ -19,6 +34,7 @@ interface AppInfo {
     size: number;
     buildNumber: number;
   } | null;
+  buildStatus: BuildStatus | null;
 }
 
 function formatBytes(bytes: number): string {
@@ -37,9 +53,67 @@ function formatDate(iso: string): string {
   });
 }
 
+function BuildStatusBadge({ buildStatus }: { buildStatus: BuildStatus | null }) {
+  if (!buildStatus) return null;
+
+  switch (buildStatus.status) {
+    case "building":
+      return (
+        <div className="text-sm text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+            <span className="font-medium">Building…</span>
+          </div>
+          <p className="text-xs mt-1 opacity-70">
+            Run #{buildStatus.runNumber} • {buildStatus.ref} • {buildStatus.sha?.slice(0, 7)}
+            {buildStatus.startedAt && ` • started ${formatDate(buildStatus.startedAt)}`}
+          </p>
+          {buildStatus.actionsUrl && (
+            <a
+              href={buildStatus.actionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs underline mt-1 inline-block"
+            >
+              View in GitHub Actions →
+            </a>
+          )}
+        </div>
+      );
+    case "failed":
+      return (
+        <div className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+          <div className="flex items-center gap-2">
+            <span>❌</span>
+            <span className="font-medium">Build Failed</span>
+          </div>
+          <p className="text-xs mt-1 opacity-70">
+            Run #{buildStatus.runNumber} • {buildStatus.ref} • {buildStatus.sha?.slice(0, 7)}
+            {buildStatus.failedStep && buildStatus.failedStep !== "unknown" && ` • failed at: ${buildStatus.failedStep}`}
+            {buildStatus.failedAt && ` • ${formatDate(buildStatus.failedAt)}`}
+          </p>
+          {buildStatus.actionsUrl && (
+            <a
+              href={buildStatus.actionsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs underline mt-1 inline-block"
+            >
+              View logs in GitHub Actions →
+            </a>
+          )}
+        </div>
+      );
+    default:
+      return null; // "success" — don't show badge, the download button is enough
+  }
+}
+
 function AppCard({ app }: { app: AppInfo }) {
   const icon = app.icon ?? "📦";
   const hasBuilt = !!app.latest;
+  const isBuilding = app.buildStatus?.status === "building";
+  const hasFailed = app.buildStatus?.status === "failed";
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-6 flex flex-col gap-4">
@@ -59,6 +133,11 @@ function AppCard({ app }: { app: AppInfo }) {
           )}
         </div>
       </div>
+
+      {/* Build status banner (building or failed) */}
+      {(isBuilding || hasFailed) && (
+        <BuildStatusBadge buildStatus={app.buildStatus} />
+      )}
 
       {hasBuilt ? (
         <>
@@ -103,12 +182,12 @@ function AppCard({ app }: { app: AppInfo }) {
             </Link>
           </div>
         </>
-      ) : (
+      ) : !isBuilding && !hasFailed ? (
         <div className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 rounded-lg p-3">
           ⏳ Registered but no build yet. Push to main to trigger the first
           build.
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

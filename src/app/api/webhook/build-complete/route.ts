@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { timingSafeEqual } from "crypto";
-import { upsertApp, type AppRegistryEntry } from "@/lib/r2/registry";
+import { upsertApp, putBuildStatus, type AppRegistryEntry, type BuildStatus } from "@/lib/r2/registry";
 
 // ---------------------------------------------------------------------------
 // Fix 6 — Simple in-memory rate limiting per IP (max 10 requests / minute)
@@ -32,7 +32,11 @@ const SAFE_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
  *
  * Receives build notifications from GitHub Actions.
  * Validates shared secret via X-Webhook-Secret header.
- * Upserts the app into the registry.
+ *
+ * Events:
+ * - build_started:  Build kicked off → status = "building"
+ * - build_complete: APK uploaded     → status = "success"
+ * - build_failed:   Build errored    → status = "failed"
  */
 export async function POST(request: NextRequest) {
   // --- Rate limiting (Fix 6) ---
@@ -58,9 +62,9 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { event, app } = body;
 
-    if (event !== "build_complete" || !app?.slug) {
+    if (!app?.slug) {
       return NextResponse.json(
-        { error: "Invalid payload: expected event=build_complete with app.slug" },
+        { error: "Invalid payload: missing app.slug" },
         { status: 400 }
       );
     }
@@ -73,16 +77,100 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const entry: AppRegistryEntry = {
-      slug: app.slug,
-      name: app.name ?? app.slug,
-      repo: app.repo ?? "unknown",
-      registeredAt: new Date().toISOString(),
-    };
+    const actionsUrl = app.actionsUrl ??
+      (app.repo && app.runId
+        ? `https://github.com/${app.repo}/actions/runs/${app.runId}`
+        : undefined);
 
-    await upsertApp(entry);
+    // --- Handle different event types ---
+    switch (event) {
+      case "build_started": {
+        // Ensure app is in registry
+        const entry: AppRegistryEntry = {
+          slug: app.slug,
+          name: app.name ?? app.slug,
+          repo: app.repo ?? "unknown",
+          registeredAt: new Date().toISOString(),
+        };
+        await upsertApp(entry);
 
-    return NextResponse.json({ ok: true, slug: app.slug });
+        // Write build status
+        const buildStatus: BuildStatus = {
+          status: "building",
+          sha: app.sha ?? "",
+          runId: app.runId ?? 0,
+          runNumber: app.runNumber ?? 0,
+          ref: app.ref ?? "main",
+          triggeredBy: app.triggeredBy ?? "unknown",
+          startedAt: app.startedAt ?? new Date().toISOString(),
+          repo: app.repo ?? "unknown",
+          actionsUrl,
+        };
+        await putBuildStatus(app.slug, buildStatus);
+
+        return NextResponse.json({ ok: true, slug: app.slug, status: "building" });
+      }
+
+      case "build_complete": {
+        const entry: AppRegistryEntry = {
+          slug: app.slug,
+          name: app.name ?? app.slug,
+          repo: app.repo ?? "unknown",
+          registeredAt: new Date().toISOString(),
+        };
+        await upsertApp(entry);
+
+        // Update build status to success
+        const buildStatus: BuildStatus = {
+          status: "success",
+          sha: app.sha ?? "",
+          runId: app.runId ?? 0,
+          runNumber: app.runNumber ?? parseInt(app.buildNumber, 10) ?? 0,
+          ref: app.ref ?? "main",
+          triggeredBy: app.triggeredBy ?? "unknown",
+          completedAt: app.buildDate ?? new Date().toISOString(),
+          repo: app.repo ?? "unknown",
+          actionsUrl,
+        };
+        await putBuildStatus(app.slug, buildStatus);
+
+        return NextResponse.json({ ok: true, slug: app.slug, status: "success" });
+      }
+
+      case "build_failed": {
+        // Ensure app is in registry
+        const entry: AppRegistryEntry = {
+          slug: app.slug,
+          name: app.name ?? app.slug,
+          repo: app.repo ?? "unknown",
+          registeredAt: new Date().toISOString(),
+        };
+        await upsertApp(entry);
+
+        // Write build status as failed
+        const buildStatus: BuildStatus = {
+          status: "failed",
+          sha: app.sha ?? "",
+          runId: app.runId ?? 0,
+          runNumber: app.runNumber ?? 0,
+          ref: app.ref ?? "main",
+          triggeredBy: app.triggeredBy ?? "unknown",
+          failedAt: app.failedAt ?? new Date().toISOString(),
+          failedStep: app.failedStep ?? "unknown",
+          repo: app.repo ?? "unknown",
+          actionsUrl,
+        };
+        await putBuildStatus(app.slug, buildStatus);
+
+        return NextResponse.json({ ok: true, slug: app.slug, status: "failed" });
+      }
+
+      default:
+        return NextResponse.json(
+          { error: `Unknown event type: ${event}` },
+          { status: 400 }
+        );
+    }
   } catch (err) {
     console.error("Webhook error:", err);
     return NextResponse.json(

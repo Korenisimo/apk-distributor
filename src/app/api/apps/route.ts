@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getRegistry, getAppMetadata } from "@/lib/r2/registry";
+import { getRegistry, getAppMetadata, getBuildStatus } from "@/lib/r2/registry";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/apps
- * List all registered apps with their latest metadata.
+ * List all registered apps with their latest metadata and build status.
  */
 export async function GET() {
   const session = await auth();
@@ -19,8 +19,11 @@ export async function GET() {
 
     const apps = await Promise.all(
       registry.map(async (entry) => {
-        const metadata = await getAppMetadata(entry.slug);
-        return { ...entry, latest: metadata };
+        const [metadata, buildStatus] = await Promise.all([
+          getAppMetadata(entry.slug),
+          getBuildStatus(entry.slug),
+        ]);
+        return { ...entry, latest: metadata, buildStatus };
       })
     );
 

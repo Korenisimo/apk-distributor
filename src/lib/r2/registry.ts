@@ -25,6 +25,21 @@ export interface AppMetadata {
   buildNumber: number;
 }
 
+export interface BuildStatus {
+  status: "building" | "success" | "failed";
+  sha: string;
+  runId: number;
+  runNumber: number;
+  ref: string;
+  triggeredBy: string;
+  startedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  failedStep?: string;
+  actionsUrl?: string;
+  repo: string;
+}
+
 const REGISTRY_KEY = "apps/registry.json";
 
 /** Read the master app registry from R2. Returns empty array if not found. */
@@ -88,6 +103,41 @@ export async function getAppMetadata(
     if (err && typeof err === "object" && "name" in err && err.name === "NoSuchKey") return null;
     throw err;
   }
+}
+
+/** Get the build status for a specific app. Returns null if not found. */
+export async function getBuildStatus(
+  slug: string
+): Promise<BuildStatus | null> {
+  try {
+    const res = await getR2Client().send(
+      new GetObjectCommand({
+        Bucket: getR2Bucket(),
+        Key: `apps/${slug}/build-status.json`,
+      })
+    );
+    const body = await res.Body?.transformToString();
+    if (!body) return null;
+    return JSON.parse(body);
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "name" in err && err.name === "NoSuchKey") return null;
+    throw err;
+  }
+}
+
+/** Write the build status for a specific app. */
+export async function putBuildStatus(
+  slug: string,
+  buildStatus: BuildStatus
+): Promise<void> {
+  await getR2Client().send(
+    new PutObjectCommand({
+      Bucket: getR2Bucket(),
+      Key: `apps/${slug}/build-status.json`,
+      Body: JSON.stringify(buildStatus, null, 2),
+      ContentType: "application/json",
+    })
+  );
 }
 
 /** List all app slugs that have APK files uploaded. */
