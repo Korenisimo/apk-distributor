@@ -1,36 +1,95 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 📦 APK Distributor
 
-## Getting Started
+A unified APK distribution hub for all your personal Android apps. Push to `main` in any repo → APK auto-builds → appears on your authenticated download portal.
 
-First, run the development server:
+## What It Does
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+1. **Reusable GitHub Actions workflow** — any app repo calls it to build + upload APKs to Cloudflare R2
+2. **Vercel dashboard** — lists all your apps with one-click download + QR codes
+3. **Google OAuth + email whitelist** — only you (and people you whitelist) can access it
+
+## Quick Start
+
+### 1. Deploy to Vercel
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/Korenisimo/apk-distributor)
+
+### 2. Set Vercel Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID ([console.cloud.google.com](https://console.cloud.google.com/apis/credentials)) |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `AUTH_SECRET` | Random 32+ char string (`openssl rand -base64 32`) |
+| `ALLOWED_EMAILS` | Comma-separated emails allowed to sign in |
+| `R2_ACCOUNT_ID` | Cloudflare account ID |
+| `R2_ACCESS_KEY_ID` | R2 API token access key |
+| `R2_SECRET_ACCESS_KEY` | R2 API token secret |
+| `R2_BUCKET_NAME` | R2 bucket name |
+| `WEBHOOK_SECRET` | Random shared secret for build webhooks |
+
+### 3. Add to Your App Repo
+
+Copy `examples/caller-workflow.yml` to `.github/workflows/build-apk.yml` in your app repo. Change `app-slug` and `app-name`. Add the required GitHub secrets. Push to main.
+
+See [PLUG-AND-PLAY.md](./PLUG-AND-PLAY.md) for detailed step-by-step.
+
+## Architecture
+
+```
+App Repo A ──┐
+App Repo B ──┤── GitHub Actions (reusable workflow) ──→ Cloudflare R2
+App Repo C ──┘                                              │
+                                                            │
+                                                            ▼
+                                          APK Distributor (Vercel)
+                                          ├── Google OAuth login
+                                          ├── Dashboard with app cards
+                                          └── Signed URL downloads
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Tech Stack
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Component | Technology |
+|-----------|-----------|
+| Web framework | Next.js 15 (App Router) |
+| Hosting | Vercel |
+| Auth | NextAuth.js v5 + Google |
+| Storage | Cloudflare R2 |
+| CI/CD | GitHub Actions (reusable workflows) |
+| Styling | Tailwind CSS |
+| Testing | Vitest (integration tests against real R2) |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Development
 
-## Learn More
+```bash
+npm install
+cp .env.example .env.local  # fill in values
+npm run dev                  # http://localhost:3000
+npm test                     # run integration tests
+```
 
-To learn more about Next.js, take a look at the following resources:
+## Git Config
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+This repo uses a personal GitHub account. The local git config is set to:
+```
+user.email = benezrikoren@gmail.com
+user.name = Koren Ben Ezri
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Remote uses SSH alias `github.com-korenisimo` to route to the personal account.
 
-## Deploy on Vercel
+## Cost
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+| Service | Cost |
+|---------|------|
+| Vercel | Free (Hobby) |
+| Cloudflare R2 | ~$0 (10GB free, 0 egress) |
+| GitHub Actions | Free (personal repos) |
+| Google OAuth | Free |
+| **Total** | **$0/month** |
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Docs
+
+- [PLUG-AND-PLAY.md](./PLUG-AND-PLAY.md) — Step-by-step: add a new app in 5 minutes
+- [LLM-INSTRUCTIONS.md](./LLM-INSTRUCTIONS.md) — Guide for AI agents creating new apps

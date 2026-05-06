@@ -1,0 +1,167 @@
+name: Build APK & Upload to Distributor
+
+on:
+  workflow_call:
+    inputs:
+      app-slug:
+        description: 'Unique slug for this app (e.g., "hod-travel"). Must be URL-safe.'
+        required: true
+        type: string
+      app-name:
+        description: 'Human-readable app name (e.g., "HOD Travel Journal")'
+        required: true
+        type: string
+      build-command:
+        description: 'Command to produce the APK. Must output a file at apk-path.'
+        required: false
+        type: string
+        default: 'npx eas-cli build --platform android --profile preview --local --output ./app.apk --non-interactive'
+      apk-path:
+        description: 'Path to the built APK file'
+        required: false
+        type: string
+        default: './app.apk'
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '22'
+      java-version:
+        description: 'Java version (for Android SDK)'
+        required: false
+        type: string
+        default: '17'
+    secrets:
+      EXPO_TOKEN:
+        required: false
+      R2_ACCOUNT_ID:
+        required: true
+      R2_ACCESS_KEY_ID:
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        required: true
+      R2_BUCKET_NAME:
+        required: true
+      DISTRIBUTOR_WEBHOOK_SECRET:
+        required: true
+      DISTRIBUTOR_WEBHOOK_URL:
+        required: true
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup Java (Android SDK)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build APK
+        run: ${{ inputs.build-command }}
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Verify APK exists
+        run: |
+          if [ ! -f "${{ inputs.apk-path }}" ]; then
+            echo "❌ APK not found at ${{ inputs.apk-path }}"
+            exit 1
+          fi
+          echo "✅ APK found: $(du -h ${{ inputs.apk-path }} | cut -f1)"
+
+      - name: Upload to R2 & notify distributor
+        run: |
+          npm install --no-save @aws-sdk/client-s3
+          node -e '
+          const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+          const fs = require("fs");
+
+          const client = new S3Client({
+            region: "auto",
+            endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+            credentials: {
+              accessKeyId: process.env.R2_ACCESS_KEY_ID,
+              secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+            },
+          });
+
+          const apk = fs.readFileSync(process.env.APK_PATH);
+          const slug = process.env.APP_SLUG;
+          const bucket = process.env.R2_BUCKET_NAME;
+
+          let version = "unknown";
+          try {
+            const pkg = JSON.parse(fs.readFileSync("./package.json", "utf8"));
+            version = pkg.version || "unknown";
+          } catch {}
+
+          const metadata = {
+            slug,
+            name: process.env.APP_NAME,
+            version,
+            buildDate: new Date().toISOString(),
+            sha: process.env.GITHUB_SHA,
+            size: apk.length,
+            repo: process.env.GITHUB_REPOSITORY,
+            buildNumber: parseInt(process.env.GITHUB_RUN_NUMBER, 10),
+          };
+
+          (async () => {
+            console.log(`⬆️  Uploading ${slug} v${version} (${(apk.length / 1024 / 1024).toFixed(1)} MB)...`);
+
+            await client.send(new PutObjectCommand({
+              Bucket: bucket,
+              Key: `apps/${slug}/latest.apk`,
+              Body: apk,
+              ContentType: "application/vnd.android.package-archive",
+            }));
+            console.log("✅ APK uploaded");
+
+            await client.send(new PutObjectCommand({
+              Bucket: bucket,
+              Key: `apps/${slug}/latest.json`,
+              Body: JSON.stringify(metadata, null, 2),
+              ContentType: "application/json",
+            }));
+            console.log("✅ Metadata uploaded");
+
+            // Notify distributor dashboard
+            try {
+              const res = await fetch(process.env.DISTRIBUTOR_WEBHOOK_URL, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Webhook-Secret": process.env.DISTRIBUTOR_WEBHOOK_SECRET,
+                },
+                body: JSON.stringify({ event: "build_complete", app: metadata }),
+              });
+              console.log(`✅ Webhook notified (${res.status})`);
+            } catch (err) {
+              console.warn("⚠️  Webhook notification failed (non-fatal):", err.message);
+            }
+
+            console.log(`\n🎉 Done! ${slug} v${version} is live.`);
+          })();
+          '
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          DISTRIBUTOR_WEBHOOK_SECRET: ${{ secrets.DISTRIBUTOR_WEBHOOK_SECRET }}
+          DISTRIBUTOR_WEBHOOK_URL: ${{ secrets.DISTRIBUTOR_WEBHOOK_URL }}
+          APP_SLUG: ${{ inputs.app-slug }}
+          APP_NAME: ${{ inputs.app-name }}
+          APK_PATH: ${{ inputs.apk-path }}

@@ -1,0 +1,49 @@
+# ============================================================
+# EXAMPLE: Add this file to your app repo
+# Copy to: .github/workflows/build-apk.yml
+# ============================================================
+#
+# Prerequisites:
+#   1. Your repo is on your PERSONAL GitHub account (Korenisimo)
+#   2. You have set the required secrets (see below)
+#   3. The apk-distributor repo is accessible to this repo
+#
+# Required GitHub Secrets (Settings → Secrets → Actions):
+#   R2_ACCOUNT_ID            — Cloudflare account ID
+#   R2_ACCESS_KEY_ID         — R2 API token access key
+#   R2_SECRET_ACCESS_KEY     — R2 API token secret
+#   R2_BUCKET_NAME           — R2 bucket name
+#   DISTRIBUTOR_WEBHOOK_SECRET — shared secret for webhook auth
+#   DISTRIBUTOR_WEBHOOK_URL  — https://your-distributor.vercel.app/api/webhook/build-complete
+#   EXPO_TOKEN               — (only for Expo/EAS apps)
+
+name: Build & Distribute APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "app/**"
+      - "app.json"
+      - "eas.json"
+      - "package.json"
+      - "package-lock.json"
+  workflow_dispatch: # manual trigger
+
+jobs:
+  build:
+    uses: Korenisimo/apk-distributor/.github/workflows/build-and-upload.yml@main
+    with:
+      app-slug: "my-app"          # ← CHANGE THIS: unique URL-safe slug
+      app-name: "My App"          # ← CHANGE THIS: human-readable name
+      # Uncomment and customize if NOT using Expo/EAS:
+      # build-command: "cd android && ./gradlew assembleRelease && cp app/build/outputs/apk/release/app-release.apk ../app.apk"
+    secrets:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+      DISTRIBUTOR_WEBHOOK_SECRET: ${{ secrets.DISTRIBUTOR_WEBHOOK_SECRET }}
+      DISTRIBUTOR_WEBHOOK_URL: ${{ secrets.DISTRIBUTOR_WEBHOOK_URL }}
