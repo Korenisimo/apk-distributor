@@ -127,8 +127,12 @@ export default function Dashboard() {
   }, [status, router]);
 
   useEffect(() => {
+    if (status !== "authenticated") return;
     fetch("/api/apps")
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((data) => {
         setApps(data.apps ?? []);
         setLoading(false);
@@ -137,7 +141,7 @@ export default function Dashboard() {
         setError(err.message);
         setLoading(false);
       });
-  }, []);
+  }, [status]);
 
   if (status === "loading" || status === "unauthenticated") {
     return (
