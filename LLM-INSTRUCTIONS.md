@@ -4,6 +4,47 @@ This document is for AI coding agents (Claude, Gemini, Cursor, Copilot, etc.) as
 
 ---
 
+## GitHub Secrets — Exact Values
+
+Every app repo needs these 7 GitHub Actions secrets. **6 are shared** (same for all repos), **1 is app-specific**.
+
+### Shared secrets (copy exactly for every app repo):
+
+```
+R2_ACCOUNT_ID          = ee9714c4bade2c83d3dca2d5dae214dc
+R2_ACCESS_KEY_ID       = d8f479c4224bacb7980749eed203957e
+R2_SECRET_ACCESS_KEY   = f5c2490ff76f15e85748b9899a6ea12cb27369731a18d57545935e3f4d9cd79b
+R2_BUCKET_NAME         = apk-distributor
+DISTRIBUTOR_WEBHOOK_SECRET = my-super-secret-webhook-key-2024
+DISTRIBUTOR_WEBHOOK_URL    = https://apk-distributor.vercel.app/api/webhook/build-complete
+```
+
+### App-specific:
+
+```
+EXPO_TOKEN = <get from https://expo.dev/accounts/settings/access-tokens>
+```
+
+> **⚠️ CRITICAL: R2_BUCKET_NAME MUST be `apk-distributor`. NOT `hod-travel-journal` or any other bucket.**
+> The Vercel dashboard reads from the `apk-distributor` R2 bucket. If the app repo uploads to a different bucket, the APK will be uploaded successfully but will NEVER appear on the dashboard. This is the #1 cause of "Registered but no build yet" errors.
+
+### Setting secrets via GitHub UI:
+Go to repo → Settings → Secrets and variables → Actions → New repository secret. Add all 7 one by one.
+
+### Setting secrets via GitHub CLI:
+```bash
+# From the app repo directory:
+gh secret set R2_ACCOUNT_ID --body "ee9714c4bade2c83d3dca2d5dae214dc"
+gh secret set R2_ACCESS_KEY_ID --body "d8f479c4224bacb7980749eed203957e"
+gh secret set R2_SECRET_ACCESS_KEY --body "f5c2490ff76f15e85748b9899a6ea12cb27369731a18d57545935e3f4d9cd79b"
+gh secret set R2_BUCKET_NAME --body "apk-distributor"
+gh secret set DISTRIBUTOR_WEBHOOK_SECRET --body "my-super-secret-webhook-key-2024"
+gh secret set DISTRIBUTOR_WEBHOOK_URL --body "https://apk-distributor.vercel.app/api/webhook/build-complete"
+gh secret set EXPO_TOKEN --body "<your-expo-token>"
+```
+
+---
+
 ## Creating a New App from Scratch
 
 ### 1. Initialize the Project
@@ -78,7 +119,17 @@ Create `.github/workflows/build-apk.yml` — copy from `examples/caller-workflow
 
 ### 6. Add GitHub Secrets
 
-The same R2 + webhook secrets used by all app repos. See PLUG-AND-PLAY.md Step 3.
+Add all 7 secrets listed at the top of this document. The fastest way:
+
+```bash
+gh secret set R2_ACCOUNT_ID --body "ee9714c4bade2c83d3dca2d5dae214dc"
+gh secret set R2_ACCESS_KEY_ID --body "d8f479c4224bacb7980749eed203957e"
+gh secret set R2_SECRET_ACCESS_KEY --body "f5c2490ff76f15e85748b9899a6ea12cb27369731a18d57545935e3f4d9cd79b"
+gh secret set R2_BUCKET_NAME --body "apk-distributor"
+gh secret set DISTRIBUTOR_WEBHOOK_SECRET --body "my-super-secret-webhook-key-2024"
+gh secret set DISTRIBUTOR_WEBHOOK_URL --body "https://apk-distributor.vercel.app/api/webhook/build-complete"
+gh secret set EXPO_TOKEN --body "<your-expo-token>"
+```
 
 ### 7. Push and Verify
 

@@ -4,12 +4,19 @@ Total time: ~5 minutes.
 
 ---
 
+## Prerequisites
+
+- A React Native / Expo app repo under the `Korenisimo` GitHub account
+- An Expo access token (for Expo/EAS apps)
+
+---
+
 ## Step 1: Choose a Slug
 
 Pick a permanent, URL-safe slug for your app. Examples:
 - `hod-travel`
-- `my-fitness-app`
-- `recipe-tracker`
+- `clean-time`
+- `rom-evolve`
 
 Rules: lowercase, hyphens only, no spaces, no special chars.
 
@@ -65,19 +72,28 @@ If your app uses plain Gradle (no Expo), add a custom `build-command`:
 
 Go to your app repo → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**.
 
-Add these secrets (same values for all your app repos):
+### Shared secrets (SAME for every app repo)
+
+These 6 secrets are identical across all app repos. Copy them exactly.
 
 | Secret | Value |
 |--------|-------|
-| `R2_ACCOUNT_ID` | Your Cloudflare account ID |
-| `R2_ACCESS_KEY_ID` | R2 API token access key |
-| `R2_SECRET_ACCESS_KEY` | R2 API token secret |
-| `R2_BUCKET_NAME` | R2 bucket name (same as distributor) |
-| `DISTRIBUTOR_WEBHOOK_SECRET` | Same value as `WEBHOOK_SECRET` in your Vercel env |
-| `DISTRIBUTOR_WEBHOOK_URL` | `https://your-distributor.vercel.app/api/webhook/build-complete` |
-| `EXPO_TOKEN` | Your Expo token (only for Expo/EAS apps) |
+| `R2_ACCOUNT_ID` | `ee9714c4bade2c83d3dca2d5dae214dc` |
+| `R2_ACCESS_KEY_ID` | `d8f479c4224bacb7980749eed203957e` |
+| `R2_SECRET_ACCESS_KEY` | `f5c2490ff76f15e85748b9899a6ea12cb27369731a18d57545935e3f4d9cd79b` |
+| `R2_BUCKET_NAME` | `apk-distributor` |
+| `DISTRIBUTOR_WEBHOOK_SECRET` | `my-super-secret-webhook-key-2024` |
+| `DISTRIBUTOR_WEBHOOK_URL` | `https://apk-distributor.vercel.app/api/webhook/build-complete` |
 
-**Pro tip:** If you have many repos under the same GitHub account, use [Organization secrets](https://docs.github.com/en/actions/security-guides/using-secrets-in-github-actions#creating-secrets-for-an-organization) to set these once.
+### App-specific secrets
+
+| Secret | Value |
+|--------|-------|
+| `EXPO_TOKEN` | Your Expo access token (get from [expo.dev/accounts/settings/access-tokens](https://expo.dev/accounts/settings/access-tokens)). Only needed for Expo/EAS apps. |
+
+> **⚠️ CRITICAL: R2_BUCKET_NAME must be `apk-distributor`.**
+> Do NOT use any other bucket name. The distributor dashboard reads from this bucket.
+> Using a different bucket (e.g. `hod-travel-journal`) will cause your app to upload successfully but never appear on the dashboard.
 
 ## Step 4: Push to Main
 
@@ -87,10 +103,12 @@ git commit -m "Add APK distributor workflow"
 git push origin main
 ```
 
+Or trigger manually from GitHub Actions → "Run workflow".
+
 ## Step 5: Download
 
-1. Wait for the GitHub Actions build to complete (~5-15 minutes for first build)
-2. Go to your distributor dashboard (e.g., `https://apk.yourdomain.com`)
+1. Wait for the GitHub Actions build to complete (~10-15 minutes)
+2. Go to [apk-distributor.vercel.app](https://apk-distributor.vercel.app)
 3. Sign in with Google
 4. Your app appears with a download button
 
@@ -98,17 +116,31 @@ git push origin main
 
 ## Troubleshooting
 
+### App shows "Registered but no build yet"
+
+**Most common cause:** `R2_BUCKET_NAME` is set to the wrong bucket. It MUST be `apk-distributor`. Check your repo's GitHub secrets.
+
+What happens: The APK uploads to the wrong R2 bucket, but the webhook registers the app in the correct bucket's registry. Result: app appears but has no downloadable build.
+
 ### Build fails with "EXPO_TOKEN not set"
+
 → Add `EXPO_TOKEN` secret to your repo. Get it from [expo.dev/accounts/settings/access-tokens](https://expo.dev/accounts/settings/access-tokens).
 
-### App doesn't appear on dashboard
-→ Check that `DISTRIBUTOR_WEBHOOK_URL` and `DISTRIBUTOR_WEBHOOK_SECRET` are correct. The webhook notifies the dashboard about new builds.
+### Build succeeds but app doesn't appear on dashboard at all
+
+→ The webhook failed. Check that:
+1. `DISTRIBUTOR_WEBHOOK_URL` is exactly `https://apk-distributor.vercel.app/api/webhook/build-complete`
+2. `DISTRIBUTOR_WEBHOOK_SECRET` matches `WEBHOOK_SECRET` on the Vercel deployment (currently: `my-super-secret-webhook-key-2024`)
+
+You can verify by checking the "Upload to R2 & notify distributor" step in the GitHub Actions log — look for `✅ Webhook notified (200)` or `⚠️ Webhook notification failed`.
 
 ### Download returns 404
-→ The build succeeded but APK upload failed. Check the "Upload to R2" step in GitHub Actions logs. Verify R2 credentials.
+
+→ The R2 upload failed. Check the "Upload to R2" step in GitHub Actions logs. Verify R2 credentials (`R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`) have write access to the `apk-distributor` bucket.
 
 ### "Not authorized" on login
-→ Your email is not in the `ALLOWED_EMAILS` Vercel env var. Add it (comma-separated).
+
+→ Your email is not in the `ALLOWED_EMAILS` Vercel env var. Add it (comma-separated) in Vercel → apk-distributor → Settings → Environment Variables.
 
 ---
 
@@ -116,7 +148,25 @@ git push origin main
 
 To remove an app from the dashboard:
 1. Delete the workflow file from your app repo
-2. Manually delete `apps/{slug}/` from the R2 bucket
+2. Manually delete `apps/{slug}/` from the `apk-distributor` R2 bucket
 3. Remove the entry from `apps/registry.json` in R2
 
 The app will no longer appear on the dashboard and downloads will stop.
+
+---
+
+## Architecture Reference
+
+```
+App Repo (GitHub Actions)
+  ├── Build APK via EAS local build
+  ├── Upload APK + metadata to R2 bucket "apk-distributor"
+  └── POST webhook to Vercel → registers app in registry.json
+
+Vercel (apk-distributor.vercel.app)
+  ├── Reads registry.json from R2 → lists apps
+  ├── Reads apps/{slug}/latest.json → shows version/size/date
+  └── Generates signed download URLs for APK files
+```
+
+Both the GitHub Actions workflow AND the Vercel dashboard must point to the **same R2 bucket** (`apk-distributor`). If they don't match, uploads go to one place and reads happen from another.
