@@ -5,6 +5,9 @@ import { getR2SignedUrl } from "@/lib/r2/signed-url";
 import { getAppMetadata } from "@/lib/r2/registry";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 
+// Fix 2 — Slug validation (only alphanumeric, hyphens, underscores)
+const SAFE_SLUG_RE = /^[a-zA-Z0-9_-]+$/;
+
 /**
  * GET /api/download/[slug]
  *
@@ -21,6 +24,15 @@ export async function GET(
   }
 
   const { slug } = await params;
+
+  // --- Slug path-traversal guard (Fix 2) ---
+  if (!SAFE_SLUG_RE.test(slug)) {
+    return NextResponse.json(
+      { error: "Invalid slug: only alphanumeric, hyphens, and underscores allowed" },
+      { status: 400 }
+    );
+  }
+
   const apkKey = `apps/${slug}/latest.apk`;
 
   try {

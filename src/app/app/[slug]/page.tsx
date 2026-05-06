@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { QRCodeSVG } from "qrcode.react";
 
 interface AppMetadata {
   slug: string;
@@ -77,6 +78,11 @@ export default function AppDetailPage() {
     );
   }
 
+  const downloadUrl =
+    typeof window !== "undefined"
+      ? `${window.location.origin}/api/download/${slug}`
+      : "";
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="max-w-lg mx-auto px-4 py-12">
@@ -110,23 +116,19 @@ export default function AppDetailPage() {
             ⬇ Download APK
           </a>
 
-          {/* QR code for mobile */}
-          <div className="mt-6 text-center">
-            <p className="text-xs text-gray-400 mb-2">
-              Scan to download on phone
-            </p>
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(
-                typeof window !== "undefined"
-                  ? `${window.location.origin}/api/download/${slug}`
-                  : ""
-              )}`}
-              alt="QR code"
-              className="mx-auto rounded-lg"
-              width={150}
-              height={150}
-            />
-          </div>
+          {/* QR code for mobile — rendered client-side, no external service (Fix 4) */}
+          {downloadUrl && (
+            <div className="mt-6 text-center">
+              <p className="text-xs text-gray-400 mb-2">
+                Scan to download on phone
+              </p>
+              <QRCodeSVG
+                value={downloadUrl}
+                size={150}
+                className="mx-auto rounded-lg"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
