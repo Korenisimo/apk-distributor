@@ -4,8 +4,8 @@ import { useState, useEffect } from "react";
 
 WebBrowser.maybeCompleteAuthSession();
 
-const ANDROID_CLIENT_ID =
-  "533474735605-uq0ptg3pk8kujais33m67or6ppvq13al.apps.googleusercontent.com";
+const WEB_CLIENT_ID =
+  "1011334268673-vr2l7tj2mb6r0odgvus6k0o3oc749kh6.apps.googleusercontent.com";
 
 export interface AuthState {
   isSignedIn: boolean;
@@ -25,7 +25,7 @@ export function useGoogleAuth(): AuthState {
   const [error, setError] = useState<string | null>(null);
 
   const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    androidClientId: ANDROID_CLIENT_ID,
+    webClientId: WEB_CLIENT_ID,
   });
 
   // Effect syncs external OAuth response into component state — setState is intentional here.
