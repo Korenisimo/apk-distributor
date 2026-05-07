@@ -126,6 +126,7 @@ jobs:
             eas-local-${{ runner.os }}-
 
       - name: Install dependencies
+        id: install
         run: npm ci
 
       - name: Build APK
@@ -136,6 +137,7 @@ jobs:
           EXPO_PUBLIC_MOBILE_API_KEY: ${{ secrets.MOBILE_API_KEY }}
 
       - name: Verify APK exists
+        id: verify
         run: |
           if [ ! -f "${{ inputs.apk-path }}" ]; then
             echo "❌ APK not found at ${{ inputs.apk-path }}"
@@ -144,6 +146,7 @@ jobs:
           echo "✅ APK found: $(du -h ${{ inputs.apk-path }} | cut -f1)"
 
       - name: Upload to R2 & notify distributor
+        id: upload
         run: |
           npm install --no-save @aws-sdk/client-s3
           node -e '
@@ -169,6 +172,11 @@ jobs:
             version = pkg.version || "unknown";
           } catch {}
 
+          const runNumber = parseInt(process.env.GITHUB_RUN_NUMBER, 10);
+          const runId = process.env.GITHUB_RUN_ID;
+          const repo = process.env.GITHUB_REPOSITORY;
+          const actionsUrl = `https://github.com/${repo}/actions/runs/${runId}`;
+
           const metadata = {
             slug,
             name: process.env.APP_NAME,
@@ -176,8 +184,8 @@ jobs:
             buildDate: new Date().toISOString(),
             sha: process.env.GITHUB_SHA,
             size: apk.length,
-            repo: process.env.GITHUB_REPOSITORY,
-            buildNumber: parseInt(process.env.GITHUB_RUN_NUMBER, 10),
+            repo,
+            buildNumber: runNumber,
           };
 
           (async () => {
@@ -207,7 +215,17 @@ jobs:
                   "Content-Type": "application/json",
                   "X-Webhook-Secret": process.env.DISTRIBUTOR_WEBHOOK_SECRET,
                 },
-                body: JSON.stringify({ event: "build_complete", app: metadata }),
+                body: JSON.stringify({
+                  event: "build_complete",
+                  app: {
+                    ...metadata,
+                    runId: parseInt(runId, 10),
+                    runNumber,
+                    ref: process.env.GITHUB_REF_NAME,
+                    triggeredBy: process.env.GITHUB_ACTOR,
+                    actionsUrl,
+                  },
+                }),
               });
               console.log(`✅ Webhook notified (${res.status})`);
             } catch (err) {
@@ -227,6 +245,9 @@ jobs:
           APP_SLUG: ${{ inputs.app-slug }}
           APP_NAME: ${{ inputs.app-name }}
           APK_PATH: ${{ inputs.apk-path }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_ACTOR: ${{ github.actor }}
 
       - name: Notify build failed
         if: failure()
@@ -235,6 +256,12 @@ jobs:
           FAILED_STEP="unknown"
           if [ "${{ steps.build.outcome }}" = "failure" ]; then
             FAILED_STEP="Build APK"
+          elif [ "${{ steps.install.outcome }}" = "failure" ]; then
+            FAILED_STEP="Install dependencies"
+          elif [ "${{ steps.verify.outcome }}" = "failure" ]; then
+            FAILED_STEP="Verify APK"
+          elif [ "${{ steps.upload.outcome }}" = "failure" ]; then
+            FAILED_STEP="Upload to R2"
           fi
 
           curl -s -X POST "${{ secrets.DISTRIBUTOR_WEBHOOK_URL }}" \
