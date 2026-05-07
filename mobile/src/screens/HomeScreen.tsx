@@ -13,12 +13,6 @@ import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { fetchApps, fetchDownloadUrl, type AppInfo } from '../api';
 
-interface HomeScreenProps {
-  idToken: string;
-  user: { email: string; name: string };
-  onSignOut: () => void;
-}
-
 type DownloadState =
   | { status: 'idle' }
   | { status: 'downloading'; progress: number }
@@ -61,7 +55,7 @@ function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   );
 }
 
-function AppCard({ app, idToken }: { app: AppInfo; idToken: string }) {
+function AppCard({ app }: { app: AppInfo }) {
   const [dlState, setDlState] = useState<DownloadState>({ status: 'idle' });
 
   const handleInstall = useCallback(async () => {
@@ -72,7 +66,7 @@ function AppCard({ app, idToken }: { app: AppInfo; idToken: string }) {
     try {
       // 1. Get signed download URL
       setDlState({ status: 'downloading', progress: 0 });
-      const { url } = await fetchDownloadUrl(app.slug, idToken);
+      const { url } = await fetchDownloadUrl(app.slug);
 
       // 2. Download with progress
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -102,17 +96,13 @@ function AppCard({ app, idToken }: { app: AppInfo; idToken: string }) {
       setDlState({ status: 'done' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (msg === 'NOT_AUTHORIZED') {
-        Alert.alert('Not authorized', 'Your email is not authorized to download this app.');
-      } else {
-        Alert.alert('Install failed', msg);
-      }
+      Alert.alert('Install failed', msg);
       setDlState({ status: 'idle' });
     } finally {
       // Clean up APK file regardless of outcome
       FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
     }
-  }, [app.slug, dlState.status, idToken]);
+  }, [app.slug, dlState.status]);
 
   const resetState = useCallback(() => setDlState({ status: 'idle' }), []);
 
@@ -198,7 +188,7 @@ function AppCard({ app, idToken }: { app: AppInfo; idToken: string }) {
   );
 }
 
-export function HomeScreen({ idToken, user, onSignOut }: HomeScreenProps) {
+export function HomeScreen() {
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -209,34 +199,22 @@ export function HomeScreen({ idToken, user, onSignOut }: HomeScreenProps) {
     else setLoading(true);
     setError(null);
     try {
-      const data = await fetchApps(idToken);
+      const data = await fetchApps();
       setApps(data);
     } catch (err: unknown) {
-      if (err instanceof Error && err.message === 'NOT_AUTHORIZED') {
-        setError('Your email is not authorized to access this service.');
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load apps');
-      }
+      setError(err instanceof Error ? err.message : 'Failed to load apps');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [idToken]);
+  }, []);
 
-  // Initial load — fetch is async so setState within is fine (not synchronous).
-  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
-  useEffect(() => { load(); }, [idToken]);
+  useEffect(() => { load(); }, [load]);
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <Text style={styles.title}>📦 APK Distributor</Text>
-          <Pressable style={styles.signOutBtn} onPress={onSignOut}>
-            <Text style={styles.signOutText}>Sign out</Text>
-          </Pressable>
-        </View>
-        <Text style={styles.userEmail}>{user.email}</Text>
+        <Text style={styles.title}>📦 APK Distributor</Text>
       </View>
 
       {loading && (
@@ -259,7 +237,7 @@ export function HomeScreen({ idToken, user, onSignOut }: HomeScreenProps) {
         <FlatList
           data={apps}
           keyExtractor={(a) => a.slug}
-          renderItem={({ item }) => <AppCard app={item} idToken={idToken} />}
+          renderItem={({ item }) => <AppCard app={item} />}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
@@ -292,20 +270,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ffffff18',
   },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
   title: { fontSize: 22, fontWeight: '700', color: TEXT },
-  userEmail: { fontSize: 13, color: MUTED, marginTop: 4 },
-  signOutBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: '#ffffff12',
-  },
-  signOutText: { color: MUTED, fontSize: 13, fontWeight: '500' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   loadingText: { color: MUTED, marginTop: 8 },
   errorText: { color: '#f87171', textAlign: 'center', marginBottom: 8 },
