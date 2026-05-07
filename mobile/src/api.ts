@@ -1,9 +1,10 @@
 const BASE_URL = process.env.EXPO_PUBLIC_DISTRIBUTOR_URL ?? 'https://apk-distributor.vercel.app';
 const API_KEY = process.env.EXPO_PUBLIC_MOBILE_API_KEY ?? '';
 
-const headers = () => ({
+const headers = (token: string) => ({
   'Content-Type': 'application/json',
-  'Authorization': `Bearer ${API_KEY}`,
+  'x-api-key': API_KEY,
+  'Authorization': `Bearer ${token}`,
 });
 
 export interface AppInfo {
@@ -27,15 +28,19 @@ export interface AppInfo {
   } | null;
 }
 
-export async function fetchApps(): Promise<AppInfo[]> {
-  const res = await fetch(`${BASE_URL}/api/mobile/apps`, { headers: headers() });
+export async function fetchApps(token: string): Promise<AppInfo[]> {
+  const res = await fetch(`${BASE_URL}/api/mobile/apps`, { headers: headers(token) });
+  if (res.status === 401) throw new Error('NOT_AUTHORIZED');
   if (!res.ok) throw new Error(`Failed to fetch apps: ${res.status}`);
   const data = await res.json();
   return data.apps;
 }
 
-export async function fetchDownloadUrl(slug: string): Promise<{ url: string; filename: string }> {
-  const res = await fetch(`${BASE_URL}/api/mobile/download/${slug}`, { headers: headers() });
+export async function fetchDownloadUrl(slug: string, token: string): Promise<string> {
+  const res = await fetch(`${BASE_URL}/api/mobile/download/${slug}`, {
+    headers: headers(token),
+    redirect: 'follow',
+  });
   if (!res.ok) throw new Error(`Failed to get download URL: ${res.status}`);
-  return res.json();
+  return res.url;
 }

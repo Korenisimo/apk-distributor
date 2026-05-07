@@ -55,18 +55,18 @@ function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   );
 }
 
-function AppCard({ app }: { app: AppInfo }) {
+function AppCard({ app, token }: { app: AppInfo; token: string }) {
   const [dlState, setDlState] = useState<DownloadState>({ status: 'idle' });
 
   const handleInstall = useCallback(async () => {
     if (dlState.status !== 'idle') return;
 
-    const localPath = `${FileSystem.cacheDirectory}${app.slug}-latest.apk`;
+    const localPath = `${(FileSystem as any).cacheDirectory ?? ""}${app.slug}-latest.apk`;
 
     try {
       // 1. Get signed download URL
       setDlState({ status: 'downloading', progress: 0 });
-      const { url } = await fetchDownloadUrl(app.slug);
+      const url = await fetchDownloadUrl(app.slug, token);
 
       // 2. Download with progress
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -188,7 +188,7 @@ function AppCard({ app }: { app: AppInfo }) {
   );
 }
 
-export function HomeScreen() {
+export function HomeScreen({ token, email, onSignOut }: { token: string; email: string; onSignOut: () => void }) {
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -199,7 +199,7 @@ export function HomeScreen() {
     else setLoading(true);
     setError(null);
     try {
-      const data = await fetchApps();
+      const data = await fetchApps(token);
       setApps(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load apps');
@@ -215,6 +215,8 @@ export function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>📦 APK Distributor</Text>
+        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>{email}</Text>
+        <Pressable onPress={onSignOut} style={{ position: 'absolute', right: 20, top: 56 }}><Text style={{ color: '#60a5fa', fontSize: 13 }}>Sign out</Text></Pressable>
       </View>
 
       {loading && (
@@ -237,7 +239,7 @@ export function HomeScreen() {
         <FlatList
           data={apps}
           keyExtractor={(a) => a.slug}
-          renderItem={({ item }) => <AppCard app={item} />}
+          renderItem={({ item }) => <AppCard app={item} token={token} />}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl

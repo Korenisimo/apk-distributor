@@ -1,35 +1,30 @@
-import { NextResponse, type NextRequest } from "next/server";
-import { validateMobileToken } from "@/lib/auth/mobile";
-import { getRegistry, getAppMetadata, getBuildStatus } from "@/lib/r2/registry";
+import { NextRequest, NextResponse } from 'next/server';
+import { listApps } from '@/lib/apps';
+import { verifyMobileToken } from '@/lib/auth/mobile-token';
 
-export const dynamic = "force-dynamic";
+function getToken(req: NextRequest): string | null {
+  const auth = req.headers.get('authorization') ?? '';
+  if (auth.startsWith('Bearer ')) return auth.slice(7);
+  return null;
+}
 
-/**
- * GET /api/mobile/apps
- * Mobile app endpoint — authenticated via Bearer token (MOBILE_API_KEY).
- * Returns all apps with metadata and build status.
- */
-export async function GET(request: NextRequest) {
-  if (!validateMobileToken(request.headers.get("authorization"))) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+export async function GET(req: NextRequest) {
+  const apiKey = req.headers.get('x-api-key');
+  const expectedKey = process.env.MOBILE_API_KEY;
+  if (!expectedKey || apiKey !== expectedKey) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  try {
-    const registry = await getRegistry();
-
-    const apps = await Promise.all(
-      registry.map(async (entry) => {
-        const [metadata, buildStatus] = await Promise.all([
-          getAppMetadata(entry.slug),
-          getBuildStatus(entry.slug),
-        ]);
-        return { ...entry, latest: metadata, buildStatus };
-      })
-    );
-
-    return NextResponse.json({ apps });
-  } catch (err) {
-    console.error("Mobile /api/mobile/apps error:", err);
-    return NextResponse.json({ error: "Failed to list apps" }, { status: 500 });
+  const token = getToken(req);
+  if (!token) {
+    return NextResponse.json({ error: 'Missing auth token' }, { status: 401 });
   }
+
+  const payload = await verifyMobileToken(token);
+  if (!payload) {
+    return NextResponse.json({ error: 'Invalid or expired token' }, { status: 401 });
+  }
+
+  const apps = await listApps();
+  return NextResponse.json({ apps });
 }
