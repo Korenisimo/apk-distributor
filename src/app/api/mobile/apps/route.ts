@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { verifyMobileToken } from '@/lib/auth/mobile-token';
-import { getRegistry, getAppMetadata, getBuildStatus } from '@/lib/r2/registry';
+import { getRegistry, getAppMetadata, getBuildStatus, listBranches, getBranchMetadata } from '@/lib/r2/registry';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +25,32 @@ export async function GET(request: NextRequest) {
           getAppMetadata(entry.slug),
           getBuildStatus(entry.slug),
         ]);
-        return { ...entry, latest: metadata, buildStatus };
+
+        // For ROM-type apps, also fetch branch info
+        let branches: Array<{ name: string; version?: string; buildDate?: string; size?: number; commitMessage?: string }> | undefined;
+        if (entry.fileType === 'rom') {
+          const branchNames = await listBranches(entry.slug);
+          branches = await Promise.all(
+            branchNames.map(async (name) => {
+              const branchMeta = await getBranchMetadata(entry.slug, name);
+              return {
+                name,
+                version: branchMeta?.version,
+                buildDate: branchMeta?.buildDate,
+                size: branchMeta?.size,
+                commitMessage: branchMeta?.commitMessage,
+              };
+            }),
+          );
+          // Sort by buildDate descending (most recently updated first)
+          branches.sort((a, b) => {
+            const da = a.buildDate ? new Date(a.buildDate).getTime() : 0;
+            const db = b.buildDate ? new Date(b.buildDate).getTime() : 0;
+            return db - da;
+          });
+        }
+
+        return { ...entry, latest: metadata, buildStatus, ...(branches && { branches }) };
       }),
     );
     return NextResponse.json({ apps });

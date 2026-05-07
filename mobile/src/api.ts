@@ -7,11 +7,21 @@ const headers = (token: string) => ({
   'Authorization': `Bearer ${token}`,
 });
 
+export interface BranchInfo {
+  name: string;
+  version?: string;
+  buildDate?: string;
+  size?: number;
+  commitMessage?: string;
+}
+
 export interface AppInfo {
   slug: string;
   name: string;
   repo: string;
   registeredAt: string;
+  fileType?: 'apk' | 'rom';
+  branches?: BranchInfo[];
   latest: {
     version: string;
     buildDate: string;
@@ -39,8 +49,10 @@ export async function fetchApps(token: string): Promise<AppInfo[]> {
 export async function fetchDownloadUrl(
   slug: string,
   token: string,
+  branch?: string,
 ): Promise<{ url: string; filename: string }> {
-  const res = await fetch(`${BASE_URL}/api/mobile/download/${slug}`, {
+  const params = branch ? `?branch=${encodeURIComponent(branch)}` : '';
+  const res = await fetch(`${BASE_URL}/api/mobile/download/${slug}${params}`, {
     headers: headers(token),
   });
   if (res.status === 401) throw new Error('NOT_AUTHORIZED');

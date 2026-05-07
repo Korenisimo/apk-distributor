@@ -16,6 +16,7 @@ const WARN = '#f59e0b';
 const DANGER = '#ef4444';
 const MUTED = '#94a3b8';
 const WHITE = '#f8fafc';
+const ROM_ACCENT = '#a855f7';
 
 // Android intent flags
 const FLAG_GRANT_READ_URI_PERMISSION = 0x00000001;
@@ -25,7 +26,8 @@ type DownloadState =
   | { status: 'idle' }
   | { status: 'downloading'; progress: number }
   | { status: 'installing' }
-  | { status: 'done' };
+  | { status: 'done' }
+  | { status: 'downloaded'; filePath: string };
 
 function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   if (!buildStatus || buildStatus.status === 'success') return null;
@@ -174,6 +176,142 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
   );
 }
 
+function RomAppCard({ app, token }: { app: AppInfo; token: string }) {
+  const [selectedBranch, setSelectedBranch] = useState<string>(
+    app.branches?.[0]?.name ?? '',
+  );
+  const [dlState, setDlState] = useState<DownloadState>({ status: 'idle' });
+
+  const branchMeta = app.branches?.find((b) => b.name === selectedBranch);
+
+  const handleDownload = useCallback(async () => {
+    if (dlState.status !== 'idle' || !selectedBranch) return;
+
+    try {
+      setDlState({ status: 'downloading', progress: 0 });
+      const { url, filename } = await fetchDownloadUrl(app.slug, token, selectedBranch);
+
+      const romsDir = `${FileSystem.documentDirectory}ROMs/`;
+      const dirInfo = await FileSystem.getInfoAsync(romsDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(romsDir, { intermediates: true });
+      }
+
+      const localPath = `${romsDir}${filename}`;
+
+      const downloadResumable = FileSystem.createDownloadResumable(
+        url,
+        localPath,
+        {},
+        ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
+          const progress = totalBytesExpectedToWrite > 0
+            ? totalBytesWritten / totalBytesExpectedToWrite
+            : 0;
+          setDlState({ status: 'downloading', progress });
+        },
+      );
+
+      const result = await downloadResumable.downloadAsync();
+      if (!result?.uri) throw new Error('Download failed — no URI returned');
+
+      setDlState({ status: 'downloaded', filePath: localPath });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      Alert.alert('Download failed', msg);
+      setDlState({ status: 'idle' });
+    }
+  }, [app.slug, dlState.status, selectedBranch, token]);
+
+  const resetState = useCallback(() => setDlState({ status: 'idle' }), []);
+
+  return (
+    <View style={styles.card}>
+      <View style={styles.cardHeader}>
+        <Text style={styles.appName}>{app.name ?? app.slug}</Text>
+        <View style={[styles.badge, { backgroundColor: ROM_ACCENT }]}>
+          <Text style={styles.badgeText}>ROM</Text>
+        </View>
+      </View>
+
+      <Text style={styles.repo}>{app.repo}</Text>
+
+      {/* Branch picker — horizontal scrollable chips */}
+      {app.branches && app.branches.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.branchScroller}
+          contentContainerStyle={styles.branchScrollContent}
+        >
+          {app.branches.map((branch) => (
+            <TouchableOpacity
+              key={branch.name}
+              style={[
+                styles.branchChip,
+                selectedBranch === branch.name && styles.branchChipActive,
+              ]}
+              onPress={() => {
+                setSelectedBranch(branch.name);
+                setDlState({ status: 'idle' });
+              }}
+            >
+              <Text
+                style={[
+                  styles.branchChipText,
+                  selectedBranch === branch.name && styles.branchChipTextActive,
+                ]}
+              >
+                {branch.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Branch metadata */}
+      {branchMeta && (
+        <View style={styles.metaGrid}>
+          {branchMeta.version != null && <MetaItem label="Version" value={branchMeta.version} />}
+          {branchMeta.size != null && <MetaItem label="Size" value={formatBytes(branchMeta.size)} />}
+          {branchMeta.buildDate != null && <MetaItem label="Updated" value={formatDate(branchMeta.buildDate)} />}
+          {branchMeta.commitMessage != null && <MetaItem label="Commit" value={branchMeta.commitMessage} />}
+        </View>
+      )}
+
+      {/* Action area */}
+      <View style={styles.actionRow}>
+        {dlState.status === 'idle' && (
+          <TouchableOpacity
+            style={[styles.btn, { backgroundColor: ROM_ACCENT }, !selectedBranch && styles.btnDisabled]}
+            onPress={handleDownload}
+            disabled={!selectedBranch}
+          >
+            <Text style={styles.btnText}>⬇ Download ROM</Text>
+          </TouchableOpacity>
+        )}
+
+        {dlState.status === 'downloading' && (
+          <View style={styles.progressWrap}>
+            <View style={styles.progressBg}>
+              <View style={[styles.progressFill, { backgroundColor: ROM_ACCENT, width: `${Math.round(dlState.progress * 100)}%` }]} />
+            </View>
+            <Text style={styles.progressLabel}>{Math.round(dlState.progress * 100)}%</Text>
+          </View>
+        )}
+
+        {dlState.status === 'downloaded' && (
+          <TouchableOpacity style={[styles.btn, { backgroundColor: SUCCESS }]} onPress={resetState}>
+            <Text style={styles.btnText}>✓ Downloaded</Text>
+            <Text style={[styles.btnText, { fontSize: 11, fontWeight: '400', marginTop: 2 }]} numberOfLines={1}>
+              {dlState.filePath}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    </View>
+  );
+}
+
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.metaItem}>
@@ -255,9 +393,13 @@ export function HomeScreen({
           contentContainerStyle={styles.list}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
         >
-          {apps.map(app => (
-            <AppCard key={app.slug} app={app} token={token} />
-          ))}
+          {apps.map(app =>
+            app.fileType === 'rom' ? (
+              <RomAppCard key={app.slug} app={app} token={token} />
+            ) : (
+              <AppCard key={app.slug} app={app} token={token} />
+            ),
+          )}
           {apps.length === 0 && (
             <Text style={[styles.errorText, { textAlign: 'center' }]}>No apps registered yet.</Text>
           )}
@@ -305,4 +447,27 @@ const styles = StyleSheet.create({
   progressLabel: { color: MUTED, fontSize: 12, textAlign: 'center' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: 'center' },
   statusText: { color: MUTED, fontSize: 13 },
+  branchScroller: { marginBottom: 16 },
+  branchScrollContent: { gap: 8, paddingVertical: 4 },
+  branchChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    backgroundColor: '#334155',
+    borderWidth: 1,
+    borderColor: '#475569',
+  },
+  branchChipActive: {
+    backgroundColor: '#a855f722',
+    borderColor: ROM_ACCENT,
+  },
+  branchChipText: {
+    color: MUTED,
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  branchChipTextActive: {
+    color: ROM_ACCENT,
+    fontWeight: '600',
+  },
 });
