@@ -13,6 +13,12 @@ import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { fetchApps, fetchDownloadUrl, type AppInfo } from '../api';
 
+interface HomeScreenProps {
+  idToken: string;
+  user: { email: string; name: string };
+  onSignOut: () => void;
+}
+
 type DownloadState =
   | { status: 'idle' }
   | { status: 'downloading'; progress: number }
@@ -55,7 +61,7 @@ function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   );
 }
 
-function AppCard({ app }: { app: AppInfo }) {
+function AppCard({ app, idToken }: { app: AppInfo; idToken: string }) {
   const [dlState, setDlState] = useState<DownloadState>({ status: 'idle' });
 
   const handleInstall = useCallback(async () => {
@@ -66,7 +72,7 @@ function AppCard({ app }: { app: AppInfo }) {
     try {
       // 1. Get signed download URL
       setDlState({ status: 'downloading', progress: 0 });
-      const { url } = await fetchDownloadUrl(app.slug);
+      const { url } = await fetchDownloadUrl(app.slug, idToken);
 
       // 2. Download with progress
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -96,13 +102,17 @@ function AppCard({ app }: { app: AppInfo }) {
       setDlState({ status: 'done' });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      Alert.alert('Install failed', msg);
+      if (msg === 'NOT_AUTHORIZED') {
+        Alert.alert('Not authorized', 'Your email is not authorized to download this app.');
+      } else {
+        Alert.alert('Install failed', msg);
+      }
       setDlState({ status: 'idle' });
     } finally {
       // Clean up APK file regardless of outcome
       FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
     }
-  }, [app.slug, dlState.status]);
+  }, [app.slug, dlState.status, idToken]);
 
   const resetState = useCallback(() => setDlState({ status: 'idle' }), []);
 
@@ -188,7 +198,7 @@ function AppCard({ app }: { app: AppInfo }) {
   );
 }
 
-export function HomeScreen() {
+export function HomeScreen({ idToken, user, onSignOut }: HomeScreenProps) {
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -199,22 +209,34 @@ export function HomeScreen() {
     else setLoading(true);
     setError(null);
     try {
-      const data = await fetchApps();
+      const data = await fetchApps(idToken);
       setApps(data);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load apps');
+      if (err instanceof Error && err.message === 'NOT_AUTHORIZED') {
+        setError('Your email is not authorized to access this service.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load apps');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [idToken]);
 
-  useEffect(() => { load(); }, [load]);
+  // Initial load — fetch is async so setState within is fine (not synchronous).
+  // eslint-disable-next-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+  useEffect(() => { load(); }, [idToken]);
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>📦 APK Distributor</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.title}>📦 APK Distributor</Text>
+          <Pressable style={styles.signOutBtn} onPress={onSignOut}>
+            <Text style={styles.signOutText}>Sign out</Text>
+          </Pressable>
+        </View>
+        <Text style={styles.userEmail}>{user.email}</Text>
       </View>
 
       {loading && (
@@ -237,7 +259,7 @@ export function HomeScreen() {
         <FlatList
           data={apps}
           keyExtractor={(a) => a.slug}
-          renderItem={({ item }) => <AppCard app={item} />}
+          renderItem={({ item }) => <AppCard app={item} idToken={idToken} />}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
@@ -270,7 +292,20 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#ffffff18',
   },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   title: { fontSize: 22, fontWeight: '700', color: TEXT },
+  userEmail: { fontSize: 13, color: MUTED, marginTop: 4 },
+  signOutBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#ffffff12',
+  },
+  signOutText: { color: MUTED, fontSize: 13, fontWeight: '500' },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
   loadingText: { color: MUTED, marginTop: 8 },
   errorText: { color: '#f87171', textAlign: 'center', marginBottom: 8 },
