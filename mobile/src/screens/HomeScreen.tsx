@@ -1,17 +1,24 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  RefreshControl,
+  View, Text, ScrollView, TouchableOpacity,
+  StyleSheet, Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
-import { fetchApps, fetchDownloadUrl, type AppInfo } from '../api';
+import { fetchApps, fetchDownloadUrl, AppInfo } from '../api';
+
+const BG = '#0f172a';
+const CARD = '#1e293b';
+const ACCENT = '#3b82f6';
+const SUCCESS = '#22c55e';
+const WARN = '#f59e0b';
+const DANGER = '#ef4444';
+const MUTED = '#94a3b8';
+const WHITE = '#f8fafc';
+
+// Android intent flags
+const FLAG_GRANT_READ_URI_PERMISSION = 0x00000001;
+const FLAG_ACTIVITY_NEW_TASK        = 0x10000000;
 
 type DownloadState =
   | { status: 'idle' }
@@ -19,40 +26,24 @@ type DownloadState =
   | { status: 'installing' }
   | { status: 'done' };
 
-function formatBytes(bytes: number) {
-  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-  return `${(bytes / 1024).toFixed(0)} KB`;
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
-}
-
 function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   if (!buildStatus || buildStatus.status === 'success') return null;
 
   if (buildStatus.status === 'building') {
     return (
-      <View style={[styles.badge, styles.badgeBuilding]}>
-        <ActivityIndicator size="small" color="#60a5fa" style={{ marginRight: 6 }} />
-        <Text style={styles.badgeBuildingText}>
-          Building… run #{buildStatus.runNumber}
-        </Text>
+      <View style={[styles.badge, { backgroundColor: WARN }]}>
+        <Text style={styles.badgeText}>Building #{buildStatus.runNumber}</Text>
       </View>
     );
   }
-
-  return (
-    <View style={[styles.badge, styles.badgeFailed]}>
-      <Text style={styles.badgeFailedText}>
-        ❌ Build failed{buildStatus.failedStep && buildStatus.failedStep !== 'unknown'
-          ? ` at: ${buildStatus.failedStep}`
-          : ''}
-      </Text>
-    </View>
-  );
+  if (buildStatus.status === 'failed') {
+    return (
+      <View style={[styles.badge, { backgroundColor: DANGER }]}>
+        <Text style={styles.badgeText}>Build failed</Text>
+      </View>
+    );
+  }
+  return null;
 }
 
 function AppCard({ app, token }: { app: AppInfo; token: string }) {
@@ -78,7 +69,7 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
             ? totalBytesWritten / totalBytesExpectedToWrite
             : 0;
           setDlState({ status: 'downloading', progress });
-        }
+        },
       );
 
       const result = await downloadResumable.downloadAsync();
@@ -89,7 +80,7 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
       const contentUri = await FileSystem.getContentUriAsync(result.uri);
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: contentUri,
-        flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+        flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK,
         type: 'application/vnd.android.package-archive',
       });
 
@@ -99,232 +90,201 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
       Alert.alert('Install failed', msg);
       setDlState({ status: 'idle' });
     } finally {
-      // Clean up APK file regardless of outcome
+      // APK is safe to delete — Android installer copies it before installing
       FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
     }
-  }, [app.slug, dlState.status]);
+  }, [app.slug, dlState.status, token]);
 
   const resetState = useCallback(() => setDlState({ status: 'idle' }), []);
 
   const isBuilding = app.buildStatus?.status === 'building';
   const hasFailed = app.buildStatus?.status === 'failed';
-  const hasApk = !!app.latest;
 
   return (
     <View style={styles.card}>
-      {/* Header */}
       <View style={styles.cardHeader}>
-        <Text style={styles.appIcon}>📦</Text>
-        <View style={styles.cardHeaderText}>
-          <Text style={styles.appName}>{app.name}</Text>
-          <Text style={styles.appRepo}>{app.repo}</Text>
-        </View>
+        <Text style={styles.appName}>{app.name ?? app.slug}</Text>
+        <BuildBadge buildStatus={app.buildStatus} />
       </View>
 
-      {/* Build status badge */}
-      <BuildBadge buildStatus={app.buildStatus} />
+      <Text style={styles.repo}>{app.repo}</Text>
 
-      {/* Metadata */}
-      {hasApk && (
-        <View style={styles.meta}>
-          <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Version</Text>
-            <Text style={styles.metaValue}>{app.latest!.version}</Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Size</Text>
-            <Text style={styles.metaValue}>{formatBytes(app.latest!.size)}</Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Build</Text>
-            <Text style={styles.metaValue}>#{app.latest!.buildNumber}</Text>
-          </View>
-          <View style={styles.metaItem}>
-            <Text style={styles.metaLabel}>Built</Text>
-            <Text style={styles.metaValue}>{formatDate(app.latest!.buildDate)}</Text>
-          </View>
+      {app.latest && (
+        <View style={styles.metaGrid}>
+          <MetaItem label="Version" value={`${app.latest.version}`} />
+          <MetaItem label="Build" value={`#${app.latest.buildNumber}`} />
+          <MetaItem label="Size" value={formatBytes(app.latest.size)} />
+          <MetaItem label="Built" value={formatDate(app.latest.buildDate)} />
         </View>
       )}
 
-      {/* Action button */}
-      {hasApk && !isBuilding && (
-        <>
-          {dlState.status === 'idle' && (
-            <Pressable style={styles.btn} onPress={handleInstall}>
-              <Text style={styles.btnText}>⬇ Download & Install</Text>
-            </Pressable>
-          )}
+      {/* Action area */}
+      <View style={styles.actionRow}>
+        {dlState.status === 'idle' && (
+          <TouchableOpacity
+            style={[styles.btn, (isBuilding || hasFailed || !app.latest) && styles.btnDisabled]}
+            onPress={handleInstall}
+            disabled={isBuilding || hasFailed || !app.latest}
+          >
+            <Text style={styles.btnText}>⬇ Download & Install</Text>
+          </TouchableOpacity>
+        )}
 
-          {dlState.status === 'downloading' && (
-            <View style={styles.progressContainer}>
-              <View style={styles.progressTrack}>
-                <View style={[styles.progressFill, { width: `${Math.round(dlState.progress * 100)}%` }]} />
-              </View>
-              <Text style={styles.progressText}>
-                Downloading… {Math.round(dlState.progress * 100)}%
-              </Text>
+        {dlState.status === 'downloading' && (
+          <View style={styles.progressWrap}>
+            <View style={styles.progressBg}>
+              <View style={[styles.progressFill, { width: `${Math.round(dlState.progress * 100)}%` }]} />
             </View>
-          )}
+            <Text style={styles.progressLabel}>{Math.round(dlState.progress * 100)}%</Text>
+          </View>
+        )}
 
-          {dlState.status === 'installing' && (
-            <View style={styles.statusRow}>
-              <ActivityIndicator size="small" color="#60a5fa" />
-              <Text style={styles.statusText}>Waiting for installer…</Text>
-            </View>
-          )}
+        {dlState.status === 'installing' && (
+          <View style={styles.statusRow}>
+            <ActivityIndicator color={ACCENT} size="small" />
+            <Text style={styles.statusText}>Waiting for installer…</Text>
+          </View>
+        )}
 
-          {dlState.status === 'done' && (
-            <Pressable style={[styles.btn, styles.btnDone]} onPress={resetState}>
-              <Text style={styles.btnText}>✓ Done — tap to reset</Text>
-            </Pressable>
-          )}
-        </>
-      )}
-
-      {!hasApk && !isBuilding && !hasFailed && (
-        <Text style={styles.noBuild}>No build yet</Text>
-      )}
+        {dlState.status === 'done' && (
+          <TouchableOpacity style={[styles.btn, { backgroundColor: SUCCESS }]} onPress={resetState}>
+            <Text style={styles.btnText}>✓ Installed — tap to reset</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 }
 
-export function HomeScreen({ token, email, onSignOut }: { token: string; email: string; onSignOut: () => void }) {
+function MetaItem({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.metaItem}>
+      <Text style={styles.metaLabel}>{label}</Text>
+      <Text style={styles.metaValue}>{value}</Text>
+    </View>
+  );
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
+export function HomeScreen({
+  token, email, onSignOut,
+}: {
+  token: string;
+  email: string;
+  onSignOut: () => void;
+}) {
   const [apps, setApps] = useState<AppInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await fetchApps(token);
       setApps(data);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to load apps');
+    } catch (err: any) {
+      if (err?.message === 'NOT_AUTHORIZED') {
+        onSignOut();
+      } else {
+        setError('Failed to load apps. Pull down to retry.');
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [token, onSignOut]);
 
   useEffect(() => { load(); }, [load]);
 
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    load(true);
+  }, [load]);
+
   return (
-    <View style={styles.container}>
+    <View style={styles.root}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>📦 APK Distributor</Text>
-        <Text style={{ color: '#94a3b8', fontSize: 12, marginTop: 2 }}>{email}</Text>
-        <Pressable onPress={onSignOut} style={{ position: 'absolute', right: 20, top: 56 }}><Text style={{ color: '#60a5fa', fontSize: 13 }}>Sign out</Text></Pressable>
+        <Text style={styles.headerTitle}>APK Distributor</Text>
+        <TouchableOpacity onPress={onSignOut}>
+          <Text style={styles.signOut}>Sign out</Text>
+        </TouchableOpacity>
       </View>
 
-      {loading && (
+      {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#60a5fa" />
-          <Text style={styles.loadingText}>Loading apps…</Text>
+          <ActivityIndicator color={ACCENT} size="large" />
         </View>
-      )}
-
-      {error && (
+      ) : error ? (
         <View style={styles.center}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable style={styles.btn} onPress={() => load()}>
-            <Text style={styles.btnText}>Retry</Text>
-          </Pressable>
         </View>
-      )}
-
-      {!loading && !error && (
-        <FlatList
-          data={apps}
-          keyExtractor={(a) => a.slug}
-          renderItem={({ item }) => <AppCard app={item} token={token} />}
+      ) : (
+        <ScrollView
           contentContainerStyle={styles.list}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={() => load(true)}
-              tintColor="#60a5fa"
-            />
-          }
-          ListEmptyComponent={
-            <Text style={styles.emptyText}>No apps registered yet.</Text>
-          }
-        />
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
+        >
+          {apps.map(app => (
+            <AppCard key={app.slug} app={app} token={token} />
+          ))}
+          {apps.length === 0 && (
+            <Text style={[styles.errorText, { textAlign: 'center' }]}>No apps registered yet.</Text>
+          )}
+        </ScrollView>
       )}
     </View>
   );
 }
 
-const BG = '#0f0c29';
-const CARD = '#1a1740';
-const ACCENT = '#60a5fa';
-const TEXT = '#f1f5f9';
-const MUTED = '#94a3b8';
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: BG },
+  root: { flex: 1, backgroundColor: BG },
   header: {
-    paddingTop: 56,
-    paddingBottom: 16,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ffffff18',
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: '#334155',
   },
-  title: { fontSize: 22, fontWeight: '700', color: TEXT },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
-  loadingText: { color: MUTED, marginTop: 8 },
-  errorText: { color: '#f87171', textAlign: 'center', marginBottom: 8 },
-  emptyText: { color: MUTED, textAlign: 'center', marginTop: 40 },
-  list: { padding: 16, gap: 14 },
-
+  headerTitle: { color: WHITE, fontSize: 20, fontWeight: '700' },
+  signOut: { color: ACCENT, fontSize: 14 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  errorText: { color: MUTED, fontSize: 14 },
+  list: { padding: 16, gap: 16 },
   card: {
-    backgroundColor: CARD,
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
-    borderWidth: 1,
-    borderColor: '#ffffff12',
+    backgroundColor: CARD, borderRadius: 16, padding: 20,
+    borderWidth: 1, borderColor: '#334155',
   },
-  cardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  cardHeaderText: { flex: 1 },
-  appIcon: { fontSize: 32 },
-  appName: { fontSize: 17, fontWeight: '600', color: TEXT },
-  appRepo: { fontSize: 12, color: MUTED, marginTop: 2 },
-
-  badge: { borderRadius: 8, padding: 10, flexDirection: 'row', alignItems: 'center' },
-  badgeBuilding: { backgroundColor: '#1e3a5f' },
-  badgeBuildingText: { color: ACCENT, fontSize: 13 },
-  badgeFailed: { backgroundColor: '#3b1a1a' },
-  badgeFailedText: { color: '#f87171', fontSize: 13 },
-
-  meta: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  metaItem: { flex: 1, minWidth: '45%' },
-  metaLabel: { fontSize: 11, color: MUTED, marginBottom: 2 },
-  metaValue: { fontSize: 13, color: TEXT, fontVariant: ['tabular-nums'] },
-
+  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  appName: { color: WHITE, fontSize: 18, fontWeight: '700', flex: 1 },
+  repo: { color: MUTED, fontSize: 12, marginBottom: 16 },
+  badge: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, marginLeft: 8 },
+  badgeText: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  metaGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
+  metaItem: { minWidth: '40%' },
+  metaLabel: { color: MUTED, fontSize: 11, marginBottom: 2 },
+  metaValue: { color: WHITE, fontSize: 14, fontWeight: '500' },
+  actionRow: { alignItems: 'stretch' },
   btn: {
-    backgroundColor: ACCENT,
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
+    backgroundColor: ACCENT, borderRadius: 12,
+    paddingVertical: 14, alignItems: 'center',
   },
-  btnDone: { backgroundColor: '#16a34a' },
-  btnText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-
-  progressContainer: { gap: 6 },
-  progressTrack: {
-    height: 6,
-    backgroundColor: '#ffffff20',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  progressFill: { height: '100%', backgroundColor: ACCENT, borderRadius: 3 },
-  progressText: { color: MUTED, fontSize: 12, textAlign: 'center' },
-
+  btnDisabled: { opacity: 0.4 },
+  btnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  progressWrap: { gap: 8 },
+  progressBg: { height: 8, backgroundColor: '#334155', borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: ACCENT, borderRadius: 4 },
+  progressLabel: { color: MUTED, fontSize: 12, textAlign: 'center' },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: 'center' },
   statusText: { color: MUTED, fontSize: 13 },
-
-  noBuild: { color: MUTED, fontSize: 13, textAlign: 'center' },
 });

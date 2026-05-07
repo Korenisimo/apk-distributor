@@ -14,6 +14,7 @@
     "expo-file-system": "~19.0.22",
     "expo-intent-launcher": "~13.0.8",
     "expo-linking": "~8.0.12",
+    "expo-screen-orientation": "~9.0.9",
     "expo-status-bar": "~3.0.9",
     "expo-web-browser": "~15.0.11",
     "react": "19.1.0",

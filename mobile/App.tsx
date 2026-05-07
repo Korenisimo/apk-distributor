@@ -1,9 +1,13 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { useAuth } from './src/auth/useAuth';
 import { View, ActivityIndicator } from 'react-native';
+import * as ScreenOrientation from 'expo-screen-orientation';
+
+// Lock to portrait on startup
+ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
 
 export default function App() {
   const auth = useAuth();
