@@ -2,6 +2,7 @@
   "expo": {
     "name": "APK Distributor",
     "slug": "apk-distributor-mobile",
+    "scheme": "apk-distributor",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
@@ -23,7 +24,8 @@
             "android.permission.WRITE_EXTERNAL_STORAGE"
           ]
         }
-      ]
+      ],
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {
