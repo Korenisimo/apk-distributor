@@ -95,15 +95,20 @@ These 6 secrets are identical across all app repos. Copy them exactly.
 > Do NOT use any other bucket name. The distributor dashboard reads from this bucket.
 > Using a different bucket (e.g. `hod-travel-journal`) will cause your app to upload successfully but never appear on the dashboard.
 
-## Native App Access Control
+## Access Control
 
-The distributor mobile app (APK Distributor) authenticates via `MOBILE_API_KEY` — a shared API key baked into the app at build time. This means:
+Both web and native enforce email-based access:
 
-- **Anyone who installs the APK can use the native app** — there is no per-user login on native
-- Access is controlled by who you distribute the APK to
-- The `ALLOWED_EMAILS` whitelist only applies to the **web dashboard** (Google OAuth login)
+| Platform | Auth Flow | Email Gating |
+|----------|-----------|-------------|
+| **Web** | Google OAuth → session cookie | ✅ `ALLOWED_EMAILS` checked at login |
+| **Native** | Google Sign-In → ID token + `MOBILE_API_KEY` | ✅ `ALLOWED_EMAILS` checked on every API call |
 
-If you need per-user access control on native, you would need to add a login screen to the mobile app.
+The native app requires **two things** to work:
+1. `MOBILE_API_KEY` — shared API key baked into the APK at build time (prevents random API calls)
+2. **Google Sign-In** — user must sign in with a Google account that's in the `ALLOWED_EMAILS` whitelist
+
+To add/remove users, update the `ALLOWED_EMAILS` shared env var in Vercel (comma-separated). Changes apply immediately — no rebuild needed.
 
 ## Step 4: Push to Main
 
