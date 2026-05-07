@@ -9,7 +9,7 @@ import {
   View,
   RefreshControl,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
 import { fetchApps, fetchDownloadUrl, type AppInfo } from '../api';
 
@@ -61,7 +61,7 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
   const handleInstall = useCallback(async () => {
     if (dlState.status !== 'idle') return;
 
-    const localPath = `${(FileSystem as any).cacheDirectory ?? ""}${app.slug}-latest.apk`;
+    const localPath = `${FileSystem.cacheDirectory ?? ''}${app.slug}-latest.apk`;
 
     try {
       // 1. Get signed download URL
