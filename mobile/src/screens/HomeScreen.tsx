@@ -66,7 +66,7 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
     try {
       // 1. Get signed download URL
       setDlState({ status: 'downloading', progress: 0 });
-      const url = await fetchDownloadUrl(app.slug, token);
+      const { url } = await fetchDownloadUrl(app.slug, token);
 
       // 2. Download with progress
       const downloadResumable = FileSystem.createDownloadResumable(

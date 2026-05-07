@@ -36,11 +36,14 @@ export async function fetchApps(token: string): Promise<AppInfo[]> {
   return data.apps;
 }
 
-export async function fetchDownloadUrl(slug: string, token: string): Promise<string> {
+export async function fetchDownloadUrl(
+  slug: string,
+  token: string,
+): Promise<{ url: string; filename: string }> {
   const res = await fetch(`${BASE_URL}/api/mobile/download/${slug}`, {
     headers: headers(token),
-    redirect: 'follow',
   });
+  if (res.status === 401) throw new Error('NOT_AUTHORIZED');
   if (!res.ok) throw new Error(`Failed to get download URL: ${res.status}`);
-  return res.url;
+  return res.json();
 }
