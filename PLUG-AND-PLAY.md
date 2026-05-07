@@ -82,7 +82,7 @@ These 6 secrets are identical across all app repos. Copy them exactly.
 | `R2_ACCESS_KEY_ID` | `d8f479c4224bacb7980749eed203957e` |
 | `R2_SECRET_ACCESS_KEY` | `f5c2490ff76f15e85748b9899a6ea12cb27369731a18d57545935e3f4d9cd79b` |
 | `R2_BUCKET_NAME` | `apk-distributor` |
-| `DISTRIBUTOR_WEBHOOK_SECRET` | `my-super-secret-webhook-key-2024` |
+| `DISTRIBUTOR_WEBHOOK_SECRET` | `[ask repo owner — stored in Vercel env vars as WEBHOOK_SECRET]` |
 | `DISTRIBUTOR_WEBHOOK_URL` | `https://apk-distributor.vercel.app/api/webhook/build-complete` |
 
 ### App-specific secrets
@@ -94,6 +94,16 @@ These 6 secrets are identical across all app repos. Copy them exactly.
 > **⚠️ CRITICAL: R2_BUCKET_NAME must be `apk-distributor`.**
 > Do NOT use any other bucket name. The distributor dashboard reads from this bucket.
 > Using a different bucket (e.g. `hod-travel-journal`) will cause your app to upload successfully but never appear on the dashboard.
+
+## Native App Access Control
+
+The distributor mobile app (APK Distributor) authenticates via `MOBILE_API_KEY` — a shared API key baked into the app at build time. This means:
+
+- **Anyone who installs the APK can use the native app** — there is no per-user login on native
+- Access is controlled by who you distribute the APK to
+- The `ALLOWED_EMAILS` whitelist only applies to the **web dashboard** (Google OAuth login)
+
+If you need per-user access control on native, you would need to add a login screen to the mobile app.
 
 ## Step 4: Push to Main
 
@@ -130,7 +140,7 @@ What happens: The APK uploads to the wrong R2 bucket, but the webhook registers 
 
 → The webhook failed. Check that:
 1. `DISTRIBUTOR_WEBHOOK_URL` is exactly `https://apk-distributor.vercel.app/api/webhook/build-complete`
-2. `DISTRIBUTOR_WEBHOOK_SECRET` matches `WEBHOOK_SECRET` on the Vercel deployment (currently: `my-super-secret-webhook-key-2024`)
+2. `DISTRIBUTOR_WEBHOOK_SECRET` matches `WEBHOOK_SECRET` on the Vercel deployment. Ask the repo owner for the current value — it is stored as a sensitive env var in Vercel and should never be committed to docs.
 
 You can verify by checking the "Upload to R2 & notify distributor" step in the GitHub Actions log — look for `✅ Webhook notified (200)` or `⚠️ Webhook notification failed`.
 
@@ -164,9 +174,13 @@ App Repo (GitHub Actions)
   └── POST webhook to Vercel → registers app in registry.json
 
 Vercel (apk-distributor.vercel.app)
-  ├── Reads registry.json from R2 → lists apps
-  ├── Reads apps/{slug}/latest.json → shows version/size/date
-  └── Generates signed download URLs for APK files
+  ├── Web dashboard — Google OAuth, gated by ALLOWED_EMAILS whitelist
+  │   ├── Reads registry.json from R2 → lists apps
+  │   ├── Reads apps/{slug}/latest.json → shows version/size/date
+  │   └── Generates signed download URLs for APK files
+  └── Mobile API — Bearer MOBILE_API_KEY (no per-user auth)
+      ├── GET /api/mobile/apps → lists all apps with metadata
+      └── GET /api/mobile/download/[slug] → returns signed R2 download URL
 ```
 
 Both the GitHub Actions workflow AND the Vercel dashboard must point to the **same R2 bucket** (`apk-distributor`). If they don't match, uploads go to one place and reads happen from another.
