@@ -12,7 +12,6 @@ export interface AppRegistryEntry {
   description?: string;
   icon?: string;
   registeredAt: string;
-  fileType?: "apk" | "rom";
 }
 
 export interface AppMetadata {
@@ -39,14 +38,6 @@ export interface BuildStatus {
   failedStep?: string;
   actionsUrl?: string;
   repo: string;
-}
-
-export interface BranchMetadata {
-  branchName: string;
-  version?: string;
-  buildDate?: string;
-  size?: number;
-  commitMessage?: string;
 }
 
 const REGISTRY_KEY = "apps/registry.json";
@@ -161,77 +152,4 @@ export async function listUploadedApps(): Promise<string[]> {
   return (res.CommonPrefixes ?? [])
     .map((p) => p.Prefix?.replace("apps/", "").replace("/", "") ?? "")
     .filter(Boolean);
-}
-
-/** List branch names for a ROM-type app by scanning R2 prefix. */
-export async function listBranches(slug: string): Promise<string[]> {
-  const prefix = `apps/${slug}/branches/`;
-  const res = await getR2Client().send(
-    new ListObjectsV2Command({
-      Bucket: getR2Bucket(),
-      Prefix: prefix,
-      Delimiter: "/",
-    })
-  );
-  return (res.CommonPrefixes ?? [])
-    .map((p) => p.Prefix?.replace(prefix, "").replace(/\/$/, "") ?? "")
-    .filter(Boolean);
-}
-
-/** Get metadata for a specific branch of a ROM app. Returns null if not found. */
-export async function getBranchMetadata(
-  slug: string,
-  branch: string
-): Promise<BranchMetadata | null> {
-  try {
-    const res = await getR2Client().send(
-      new GetObjectCommand({
-        Bucket: getR2Bucket(),
-        Key: `apps/${slug}/branches/${branch}/latest.json`,
-      })
-    );
-    const body = await res.Body?.transformToString();
-    if (!body) return null;
-    return JSON.parse(body);
-  } catch (err: unknown) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "name" in err &&
-      err.name === "NoSuchKey"
-    )
-      return null;
-    throw err;
-  }
-}
-
-/** Upload a ROM file and metadata for a specific branch. */
-export async function putBranchFile(
-  slug: string,
-  branch: string,
-  fileBuffer: Buffer,
-  metadata: BranchMetadata
-): Promise<void> {
-  const prefix = `apps/${slug}/branches/${branch}`;
-  const client = getR2Client();
-  const bucket = getR2Bucket();
-
-  await Promise.all([
-    client.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: `${prefix}/latest.gba`,
-        Body: fileBuffer,
-        ContentType: "application/octet-stream",
-      })
-    ),
-    client.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: `${prefix}/latest.json`,
-        Body: JSON.stringify(metadata, null, 2),
-        ContentType: "application/json",
-      })
-    ),
-  ]);
 }
