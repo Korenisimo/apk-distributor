@@ -20,6 +20,20 @@ export interface AuthState {
   signOut: () => Promise<void>;
 }
 
+/** Decode email from our HMAC token payload (base64url-encoded JSON) */
+function emailFromToken(token: string): string {
+  try {
+    const payloadB64 = token.split('.')[0];
+    // base64url → base64 → decode
+    const b64 = payloadB64.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(b64); // atob is available in React Native (Hermes)
+    const { email } = JSON.parse(json);
+    return email ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export function useAuth(): AuthState {
   const [token, setToken] = useState<string | null>(null);
   const [email, setEmail] = useState<string | null>(null);
@@ -30,13 +44,15 @@ export function useAuth(): AuthState {
   // Restore session on mount
   useEffect(() => {
     (async () => {
-      const [storedToken, storedEmail] = await Promise.all([
-        AsyncStorage.getItem(TOKEN_KEY),
-        AsyncStorage.getItem(EMAIL_KEY),
-      ]);
-      if (storedToken && storedEmail) {
-        setToken(storedToken);
-        setEmail(storedEmail);
+      try {
+        const storedToken = await AsyncStorage.getItem(TOKEN_KEY);
+        if (storedToken) {
+          const storedEmail = (await AsyncStorage.getItem(EMAIL_KEY)) || emailFromToken(storedToken);
+          setToken(storedToken);
+          setEmail(storedEmail || 'signed in');
+        }
+      } catch {
+        // AsyncStorage read failed — treat as not signed in
       }
       setIsLoading(false);
     })();
@@ -67,16 +83,9 @@ export function useAuth(): AuthState {
       } else if (returnedError) {
         setError('Sign-in failed. Please try again.');
       } else if (returnedToken) {
-        // Decode email from token payload (first segment is base64url JSON)
-        let parsedEmail = returnedEmail ?? '';
-        if (!parsedEmail) {
-          try {
-            const payload = JSON.parse(
-              Buffer.from(returnedToken.split('.')[0], 'base64').toString(),
-            );
-            parsedEmail = payload.email ?? '';
-          } catch {}
-        }
+        // Derive email: prefer URL param, then decode from token
+        const parsedEmail = returnedEmail || emailFromToken(returnedToken) || 'signed in';
+
         await AsyncStorage.setItem(TOKEN_KEY, returnedToken);
         await AsyncStorage.setItem(EMAIL_KEY, parsedEmail);
         setToken(returnedToken);

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Alert, ActivityIndicator, RefreshControl,
+  AppState,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
@@ -49,6 +50,22 @@ function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
 function AppCard({ app, token }: { app: AppInfo; token: string }) {
   const [dlState, setDlState] = useState<DownloadState>({ status: 'idle' });
 
+  // When the Android installer opens, the app goes to background.
+  // startActivityAsync with FLAG_ACTIVITY_NEW_TASK may never resolve because
+  // the intent result isn't delivered across task boundaries.
+  // Fix: listen for foreground return and auto-reset the state.
+  useEffect(() => {
+    if (dlState.status !== 'installing') return;
+
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') {
+        // User returned from installer — reset to done briefly, then idle
+        setDlState({ status: 'done' });
+      }
+    });
+    return () => sub.remove();
+  }, [dlState.status]);
+
   const handleInstall = useCallback(async () => {
     if (dlState.status !== 'idle') return;
 
@@ -75,23 +92,24 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
       const result = await downloadResumable.downloadAsync();
       if (!result?.uri) throw new Error('Download failed — no URI returned');
 
-      // 3. Launch Android package installer
+      // 3. Launch Android package installer — do NOT await
+      // startActivityAsync may never resolve with FLAG_ACTIVITY_NEW_TASK
       setDlState({ status: 'installing' });
       const contentUri = await FileSystem.getContentUriAsync(result.uri);
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+      IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: contentUri,
         flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK,
         type: 'application/vnd.android.package-archive',
-      });
+      }).catch(() => {}); // fire-and-forget — AppState listener handles the reset
 
-      setDlState({ status: 'done' });
+      // Clean up APK after a delay (installer copies it before installing)
+      setTimeout(() => {
+        FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
+      }, 5000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       Alert.alert('Install failed', msg);
       setDlState({ status: 'idle' });
-    } finally {
-      // APK is safe to delete — Android installer copies it before installing
-      FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
     }
   }, [app.slug, dlState.status, token]);
 
