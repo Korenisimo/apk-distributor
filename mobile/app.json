@@ -12,7 +12,10 @@
         "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.INTERNET"
+        "android.permission.INTERNET",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
@@ -23,6 +26,14 @@
             "android.permission.READ_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE"
           ]
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#3b82f6",
+          "androidMode": "default"
         }
       ],
       "expo-web-browser"

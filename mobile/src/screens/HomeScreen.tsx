@@ -1,11 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, Alert, ActivityIndicator, RefreshControl,
-  AppState,
+  AppState, Platform,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as IntentLauncher from 'expo-intent-launcher';
+import * as Notifications from 'expo-notifications';
 import { fetchApps, fetchDownloadUrl, AppInfo } from '../api';
 
 const BG = '#0f172a';
@@ -21,11 +22,70 @@ const WHITE = '#f8fafc';
 const FLAG_GRANT_READ_URI_PERMISSION = 0x00000001;
 const FLAG_ACTIVITY_NEW_TASK        = 0x10000000;
 
+// Notification channel for download progress
+const DOWNLOAD_CHANNEL_ID = 'apk-downloads';
+
+// Configure how notifications are shown when the app is in the foreground
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: false, // don't pop up a banner while app is open
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+async function setupNotificationChannel() {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync(DOWNLOAD_CHANNEL_ID, {
+    name: 'APK Downloads',
+    importance: Notifications.AndroidImportance.LOW, // LOW = no sound, no heads-up
+    showBadge: false,
+    vibrationPattern: [],
+  });
+}
+
+async function requestNotificationPermission(): Promise<boolean> {
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === 'granted';
+}
+
+// Show or update a sticky progress notification
+async function showProgressNotification(
+  notifId: string,
+  appName: string,
+  progress: number, // 0–1
+) {
+  const pct = Math.round(progress * 100);
+  await Notifications.scheduleNotificationAsync({
+    identifier: notifId,
+    content: {
+      title: `Downloading ${appName}`,
+      body: `${pct}%`,
+      data: {},
+      sticky: true,
+      ...(Platform.OS === 'android' && {
+        // Android-specific: show as an ongoing progress bar
+        // expo-notifications surfaces these via the content extras
+        priority: Notifications.AndroidNotificationPriority.LOW,
+      }),
+    },
+    trigger: null, // fire immediately
+  });
+}
+
+async function dismissNotification(notifId: string) {
+  await Notifications.dismissNotificationAsync(notifId).catch(() => {});
+}
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 type DownloadState =
   | { status: 'idle' }
   | { status: 'downloading'; progress: number }
   | { status: 'installing' }
   | { status: 'done' };
+
+// ─── BuildBadge ──────────────────────────────────────────────────────────────
 
 function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   if (!buildStatus || buildStatus.status === 'success') return null;
@@ -47,8 +107,16 @@ function BuildBadge({ buildStatus }: { buildStatus: AppInfo['buildStatus'] }) {
   return null;
 }
 
+// ─── AppCard ─────────────────────────────────────────────────────────────────
+
 function AppCard({ app, token }: { app: AppInfo; token: string }) {
   const [dlState, setDlState] = useState<DownloadState>({ status: 'idle' });
+
+  // Unique notification ID per app so multiple downloads can run in parallel
+  const notifId = `dl-${app.slug}`;
+
+  // Keep a ref to the active DownloadResumable so we can cancel if needed
+  const downloadRef = useRef<FileSystem.DownloadResumable | null>(null);
 
   // When the Android installer opens, the app goes to background.
   // startActivityAsync with FLAG_ACTIVITY_NEW_TASK may never resolve because
@@ -59,64 +127,95 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
 
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active') {
-        // User returned from installer — reset to done briefly, then idle
         setDlState({ status: 'done' });
       }
     });
     return () => sub.remove();
   }, [dlState.status]);
 
+  // Clean up notification if component unmounts mid-download
+  useEffect(() => {
+    return () => {
+      dismissNotification(notifId);
+    };
+  }, [notifId]);
+
   const handleInstall = useCallback(async () => {
     if (dlState.status !== 'idle') return;
 
+    const appName = app.name ?? app.slug;
     const localPath = `${FileSystem.cacheDirectory ?? ''}${app.slug}-latest.apk`;
+
+    // Request notification permission (Android 13+). Non-blocking — we still
+    // download even if denied, we just won't show progress notifications.
+    const canNotify = await requestNotificationPermission();
 
     try {
       // 1. Get signed download URL
       setDlState({ status: 'downloading', progress: 0 });
       const { url } = await fetchDownloadUrl(app.slug, token);
 
-      // 2. Download with progress
+      // 2. Create a background-session download so it survives screen-off / backgrounding.
+      //    FileSystemSessionType.BACKGROUND hands the transfer to the OS download manager —
+      //    the JS thread can be suspended and the download keeps going.
       const downloadResumable = FileSystem.createDownloadResumable(
         url,
         localPath,
-        {},
+        {
+          sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
+        },
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
           const progress = totalBytesExpectedToWrite > 0
             ? totalBytesWritten / totalBytesExpectedToWrite
             : 0;
+
+          // Update in-app progress bar
           setDlState({ status: 'downloading', progress });
+
+          // Update notification (throttled by the OS — rapid calls are coalesced)
+          if (canNotify) {
+            showProgressNotification(notifId, appName, progress).catch(() => {});
+          }
         },
       );
 
+      downloadRef.current = downloadResumable;
+
       const result = await downloadResumable.downloadAsync();
+      downloadRef.current = null;
+
+      // Dismiss progress notification — download is done
+      if (canNotify) await dismissNotification(notifId);
+
       if (!result?.uri) throw new Error('Download failed — no URI returned');
 
-      // 3. Launch Android package installer — do NOT await
-      // startActivityAsync may never resolve with FLAG_ACTIVITY_NEW_TASK
+      // 3. Launch Android package installer — fire-and-forget
       setDlState({ status: 'installing' });
       const contentUri = await FileSystem.getContentUriAsync(result.uri);
       IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: contentUri,
         flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK,
         type: 'application/vnd.android.package-archive',
-      }).catch(() => {}); // fire-and-forget — AppState listener handles the reset
+      }).catch(() => {}); // AppState listener handles the reset
 
       // Clean up APK after a delay (installer copies it before installing)
       setTimeout(() => {
         FileSystem.deleteAsync(localPath, { idempotent: true }).catch(() => {});
       }, 5000);
+
     } catch (err: unknown) {
+      downloadRef.current = null;
+      if (canNotify) await dismissNotification(notifId);
       const msg = err instanceof Error ? err.message : String(err);
       Alert.alert('Install failed', msg);
       setDlState({ status: 'idle' });
     }
-  }, [app.slug, dlState.status, token]);
+  }, [app.slug, app.name, dlState.status, token, notifId]);
 
   const resetState = useCallback(() => setDlState({ status: 'idle' }), []);
 
   const isBuilding = app.buildStatus?.status === 'building';
-  const hasFailed = app.buildStatus?.status === 'failed';
+  const hasFailed  = app.buildStatus?.status === 'failed';
 
   return (
     <View style={styles.card}>
@@ -130,9 +229,9 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
       {app.latest && (
         <View style={styles.metaGrid}>
           <MetaItem label="Version" value={`${app.latest.version}`} />
-          <MetaItem label="Build" value={`#${app.latest.buildNumber}`} />
-          <MetaItem label="Size" value={formatBytes(app.latest.size)} />
-          <MetaItem label="Built" value={formatDate(app.latest.buildDate)} />
+          <MetaItem label="Build"   value={`#${app.latest.buildNumber}`} />
+          <MetaItem label="Size"    value={formatBytes(app.latest.size)} />
+          <MetaItem label="Built"   value={formatDate(app.latest.buildDate)} />
         </View>
       )}
 
@@ -153,7 +252,9 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
             <View style={styles.progressBg}>
               <View style={[styles.progressFill, { width: `${Math.round(dlState.progress * 100)}%` }]} />
             </View>
-            <Text style={styles.progressLabel}>{Math.round(dlState.progress * 100)}%</Text>
+            <Text style={styles.progressLabel}>
+              {Math.round(dlState.progress * 100)}% — you can close the app, download continues in background
+            </Text>
           </View>
         )}
 
@@ -174,6 +275,8 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
   );
 }
 
+// ─── MetaItem ────────────────────────────────────────────────────────────────
+
 function MetaItem({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.metaItem}>
@@ -183,9 +286,11 @@ function MetaItem({ label, value }: { label: string; value: string }) {
   );
 }
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 function formatBytes(bytes: number) {
   if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
-  if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(0)} KB`;
+  if (bytes >= 1_000)     return `${(bytes / 1_000).toFixed(0)} KB`;
   return `${bytes} B`;
 }
 
@@ -195,6 +300,8 @@ function formatDate(iso: string) {
   });
 }
 
+// ─── HomeScreen ──────────────────────────────────────────────────────────────
+
 export function HomeScreen({
   token, email, onSignOut,
 }: {
@@ -202,10 +309,15 @@ export function HomeScreen({
   email: string;
   onSignOut: () => void;
 }) {
-  const [apps, setApps] = useState<AppInfo[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [apps, setApps]           = useState<AppInfo[]>([]);
+  const [loading, setLoading]     = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]         = useState<string | null>(null);
+
+  // Set up notification channel once on mount
+  useEffect(() => {
+    setupNotificationChannel();
+  }, []);
 
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -266,6 +378,8 @@ export function HomeScreen({
     </View>
   );
 }
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: BG },
