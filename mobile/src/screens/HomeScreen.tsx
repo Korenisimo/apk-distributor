@@ -155,15 +155,12 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
       setDlState({ status: 'downloading', progress: 0 });
       const { url } = await fetchDownloadUrl(app.slug, token);
 
-      // 2. Create a background-session download so it survives screen-off / backgrounding.
-      //    FileSystemSessionType.BACKGROUND hands the transfer to the OS download manager —
-      //    the JS thread can be suspended and the download keeps going.
+      // 2. Create a foreground download (BACKGROUND session type is iOS-only —
+      //    on Android it can produce a corrupted file causing "problem parsing the package").
       const downloadResumable = FileSystem.createDownloadResumable(
         url,
         localPath,
-        {
-          sessionType: FileSystem.FileSystemSessionType.BACKGROUND,
-        },
+        {},
         ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
           const progress = totalBytesExpectedToWrite > 0
             ? totalBytesWritten / totalBytesExpectedToWrite
