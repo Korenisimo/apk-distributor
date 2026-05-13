@@ -189,14 +189,25 @@ function AppCard({ app, token }: { app: AppInfo; token: string }) {
 
       if (!result?.uri) throw new Error('Download failed — no URI returned');
 
-      // 3. Launch Android package installer — fire-and-forget
+      // 3. Show Play Protect heads-up, then launch installer
       setDlState({ status: 'installing' });
       const contentUri = await FileSystem.getContentUriAsync(result.uri);
-      IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-        data: contentUri,
-        flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK,
-        type: 'application/vnd.android.package-archive',
-      }).catch(() => {}); // AppState listener handles the reset
+
+      const launchInstaller = () => {
+        IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: contentUri,
+          flags: FLAG_GRANT_READ_URI_PERMISSION | FLAG_ACTIVITY_NEW_TASK,
+          type: 'application/vnd.android.package-archive',
+        }).catch(() => {}); // AppState listener handles the reset
+      };
+
+      Alert.alert(
+        'Play Protect Warning',
+        'Google Play Protect may block the install because this app is sideloaded.\n\n'
+        + 'If you see a warning, tap "More details" → "Install anyway".',
+        [{ text: 'Got it, install', onPress: launchInstaller }],
+        { cancelable: false },
+      );
 
       // Clean up APK after a delay (installer copies it before installing)
       setTimeout(() => {
