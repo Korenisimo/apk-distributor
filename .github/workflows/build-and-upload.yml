@@ -136,14 +136,44 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_PUBLIC_MOBILE_API_KEY: ${{ secrets.MOBILE_API_KEY }}
 
-      - name: Verify APK exists
+      - name: Verify APK exists and is valid
         id: verify
         run: |
-          if [ ! -f "${{ inputs.apk-path }}" ]; then
-            echo "❌ APK not found at ${{ inputs.apk-path }}"
+          APK="${{ inputs.apk-path }}"
+
+          # 1. File must exist
+          if [ ! -f "$APK" ]; then
+            echo "❌ APK not found at $APK"
             exit 1
           fi
-          echo "✅ APK found: $(du -h ${{ inputs.apk-path }} | cut -f1)"
+
+          SIZE=$(du -h "$APK" | cut -f1)
+          echo "✅ APK found: $SIZE"
+
+          # 2. Must be a valid ZIP (APKs are ZIPs)
+          if ! unzip -t "$APK" > /dev/null 2>&1; then
+            echo "❌ APK is not a valid ZIP — file is corrupted"
+            exit 1
+          fi
+
+          # 3. Dump manifest with aapt to verify it's a real APK and log minSdkVersion
+          AAPT=$(find $ANDROID_HOME/build-tools -name "aapt" | sort -V | tail -1)
+          if [ -n "$AAPT" ]; then
+            echo "--- APK manifest dump ---"
+            $AAPT dump badging "$APK" | grep -E "package|sdkVersion|native-code|uses-permission" || true
+            echo "-------------------------"
+
+            MIN_SDK=$($AAPT dump badging "$APK" | grep "sdkVersion" | grep -oP "minSdkVersion:'\K[0-9]+" || echo "unknown")
+            TARGET_SDK=$($AAPT dump badging "$APK" | grep "sdkVersion" | grep -oP "targetSdkVersion:'\K[0-9]+" || echo "unknown")
+            echo "📱 minSdkVersion: $MIN_SDK (Android $(awk "BEGIN{if($MIN_SDK>=35)print 15;else if($MIN_SDK>=34)print 14;else if($MIN_SDK>=33)print 13;else if($MIN_SDK>=32)print 12;else if($MIN_SDK>=30)print 11;else if($MIN_SDK>=29)print 10;else if($MIN_SDK>=28)print 9;else if($MIN_SDK>=26)print 8;else if($MIN_SDK>=24)print 7;else if($MIN_SDK>=23)print 6;else print \"<6\"}" 2>/dev/null || echo "?"))"
+            echo "🎯 targetSdkVersion: $TARGET_SDK"
+
+            if [ "$MIN_SDK" != "unknown" ] && [ "$MIN_SDK" -gt 24 ]; then
+              echo "⚠️  WARNING: minSdkVersion $MIN_SDK is higher than 24 — devices on Android 7 or lower cannot install this APK"
+            fi
+          else
+            echo "⚠️  aapt not found — skipping manifest verification"
+          fi
 
       - name: Upload to R2 & notify distributor
         id: upload
